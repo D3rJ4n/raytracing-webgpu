@@ -3,33 +3,22 @@
 
 <head>
   <meta charset="UTF-8" />
-  <title>WebGPU Raytracing</title>
+  <title>Raytracing Debug</title>
   <style>
     body {
       margin: 0;
       display: flex;
-      flex-direction: row;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      background-color: #111;
-      gap: 20px;
     }
 
     canvas {
-      border: 1px solid #444;
+      display: block;
     }
   </style>
 </head>
 
 <body>
-  <!-- WebGPU Raytracing-Ausgabe -->
-  <canvas id="gpu-canvas" width="800" height="600"></canvas>
-
-  <!-- Three.js Szene (zum Vergleich) -->
-  <canvas id="three-canvas" width="800" height="600"></canvas>
-
-  <script type="module" src="/raytracing-webgpu/src/main.ts"></script>
+  <canvas id="rayCanvas" width="400" height="400"></canvas>
+  <script type="module" src="./main.ts"></script>
 </body>
 
 </html>

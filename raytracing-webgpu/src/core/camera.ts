@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Ray } from '../core/ray'
+import { Ray } from '../core/Ray'
 
 export class Camera {
     position: THREE.Vector3
@@ -23,13 +23,12 @@ export class Camera {
         this.angle = angle
         this.aspectRatio = aspectRatio
 
-        const radiant: number = this.angle * Math.PI // conversion into Radiant
+        const radiant: number = this.angle * Math.PI / 180 // conversion into Radiant
         const halfheight: number = Math.tan(radiant / 2)//half height
         const halfWidth: number = this.aspectRatio * halfheight // half Width
 
         //Blickrichtung berechnen
         const normalLookAt: THREE.Vector3 = this.lookAt.clone().sub(this.position).normalize()
-
         // right = Kamera-Rechts-Vektor (senkrecht zu forward und Welt-y-Achse)
         const right: THREE.Vector3 = new THREE.Vector3()
             .crossVectors(normalLookAt, new THREE.Vector3(0, 1, 0))
@@ -49,7 +48,16 @@ export class Camera {
         // Bildebene horizontal und vertikal aufspannen
         this.horizontal = right.multiplyScalar(2 * halfWidth);
         this.vertical = up.multiplyScalar(2 * halfheight);
+
+
+        // DEBUG:
+        console.log("== Kamera-Setup ==")
+        console.log("forward:", normalLookAt.toArray())
+        console.log("right:", right.toArray())
+        console.log("up:", up.toArray())
+        console.log("lowerLeftCorner:", this.lowerLeftCorner.toArray())
     }
+
     /**
       * Erzeugt einen Ray für die Bildebene bei u,v ∈ [0,1].
       * u: Horizontal von links (0) nach rechts (1)

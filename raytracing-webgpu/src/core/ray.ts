@@ -6,9 +6,9 @@ export class Ray {
     tMin: number
     tMax: number
 
-    constructor(origin: THREE.Vector3, direction: THREE.Vector3, tMin = 0.001, tMax = Infinity) {
+    constructor(origin: THREE.Vector3, direction: THREE.Vector3, tMin = 0.1, tMax = Infinity) {
         this.origin = origin
-        this.direction = direction.clone().normalize()
+        this.direction = direction.normalize()
         this.tMin = tMin
         this.tMax = tMax
     }
@@ -28,9 +28,5 @@ export class Ray {
      */
     checkT(t: number): boolean {
         return t >= this.tMin && t <= this.tMax
-    }
-
-    toString(): string {
-        return `Ray[origin=(${this.origin.toArray()}), direction=(${this.direction.toArray()})]`
     }
 }

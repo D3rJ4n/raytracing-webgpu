@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { Ray } from './ray'
+import type { Ray } from '../core/Ray'
 
 export class Sphere {
     center: THREE.Vector3
@@ -15,6 +15,13 @@ export class Sphere {
    * Gibt den kleinsten gültigen t-Wert zurück oder null, wenn kein Treffer.
    */
     intersect(ray: Ray): number | null {
+
+        console.log("== Sphere.intersect aufgerufen ==")
+        console.log("Ray origin:", ray.origin.toArray())
+        console.log("Ray direction:", ray.direction.toArray())
+        console.log("Sphere center:", this.center.toArray())
+
+
         const oc = ray.origin.clone().sub(this.center)
 
         const a = ray.direction.dot(ray.direction)
@@ -33,6 +40,9 @@ export class Sphere {
             // Gültigen t-Wert im Bereich [tMin, tMax] finden
             if (ray.checkT(t1)) return t1
             if (ray.checkT(t2)) return t2
+
+            console.log("→ Rückgabe t1, t2:", t1, t2)
+
             return null
         }
     }
