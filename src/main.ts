@@ -1,446 +1,393 @@
 import * as THREE from 'three';
 
-// WGSL Shader Code
-const COMPUTE_SHADER = `
-struct Camera {
-    position: vec3<f32>,
-    _pad1: f32,
-    lookAt: vec3<f32>,
-    _pad2: f32,
-}
-
-struct Sphere {
-    center: vec3<f32>,
-    radius: f32,
-}
-
-struct RenderInfo {
-    width: u32,
-    height: u32,
-    _pad1: u32,
-    _pad2: u32,
-}
-
-@group(0) @binding(0) var<uniform> camera: Camera;
-@group(0) @binding(1) var<uniform> sphere: Sphere;
-@group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
-@group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-
-fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
-    let aspectRatio = f32(renderInfo.width) / f32(renderInfo.height);
-    let fov = 1.0472; // 60 degrees
-    
-    let forward = normalize(camera.lookAt - camera.position);
-    let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), forward));
-    let up = cross(forward, right);
-    
-    let halfHeight = tan(fov * 0.5);
-    let halfWidth = halfHeight * aspectRatio;
-    
-    let x = (uv.x * 2.0 - 1.0) * halfWidth;
-    let y = -(uv.y * 2.0 - 1.0) * halfHeight;
-    
-    return normalize(forward + x * right + y * up);
-}
-
-fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> f32 {
-    let oc = rayOrigin - sphere.center;
-    let a = dot(rayDirection, rayDirection);
-    let b = 2.0 * dot(oc, rayDirection);
-    let c = dot(oc, oc) - sphere.radius * sphere.radius;
-    
-    let discriminant = b * b - 4.0 * a * c;
-    
-    if (discriminant < 0.0) {
-        return -1.0;
-    }
-    
-    let sqrtDiscriminant = sqrt(discriminant);
-    let t1 = (-b - sqrtDiscriminant) / (2.0 * a);
-    let t2 = (-b + sqrtDiscriminant) / (2.0 * a);
-    
-    if (t1 > 0.0) {
-        return t1;
-    } else if (t2 > 0.0) {
-        return t2;
-    }
-    
-    return -1.0;
-}
-
-fn calculateLighting(hitPoint: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
-    let lightPos = vec3<f32>(5.0, 5.0, 5.0);
-    let lightDir = normalize(lightPos - hitPoint);
-    
-    let diffuse = max(dot(normal, lightDir), 0.0);
-    let ambient = 0.2;
-    let lighting = ambient + diffuse * 0.8;
-    
-    return vec3<f32>(0.0, 0.0, 1.0) * lighting; // Blau
-}
-
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
-    let pixelCoords = vec2<i32>(globalId.xy);
-    let dimensions = vec2<i32>(i32(renderInfo.width), i32(renderInfo.height));
-    
-    if (pixelCoords.x >= dimensions.x || pixelCoords.y >= dimensions.y) {
-        return;
-    }
-    
-    let uv = vec2<f32>(
-        f32(pixelCoords.x) / f32(dimensions.x),
-        f32(pixelCoords.y) / f32(dimensions.y)
-    );
-    
-    let rayDirection = getCameraRay(uv);
-    let t = intersectSphere(camera.position, rayDirection);
-    
-    var color: vec4<f32>;
-    if (t > 0.0) {
-        let hitPoint = camera.position + rayDirection * t;
-        let normal = normalize(hitPoint - sphere.center);
-        let rgb = calculateLighting(hitPoint, normal);
-        color = vec4<f32>(rgb, 1.0);
-    } else {
-        // Weißer Hintergrund
-        color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-    }
-    
-    textureStore(outputTexture, pixelCoords, color);
-}
-`;
-
-const RENDER_SHADER = `
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-}
-
-@vertex
-fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-    var output: VertexOutput;
-    
-    let x = f32((vertexIndex << 1u) & 2u);
-    let y = f32(vertexIndex & 2u);
-    
-    output.position = vec4<f32>(x * 2.0 - 1.0, -y * 2.0 + 1.0, 0.0, 1.0);
-    output.uv = vec2<f32>(x, y);
-    
-    return output;
-}
-
-@group(0) @binding(0) var inputTexture: texture_2d<f32>;
-@group(0) @binding(1) var textureSampler: sampler;
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(inputTexture, textureSampler, input.uv);
-}
-`;
-
+// ===== HAUPTKLASSE: StorageBufferWebGPURaytracer =====
 class StorageBufferWebGPURaytracer {
-    private canvas: HTMLCanvasElement;
-    private device: GPUDevice | null = null;
-    private context: GPUCanvasContext | null = null;
-    private statusElement: HTMLElement;
+    // DOM-Elemente
+    private canvas: HTMLCanvasElement;      // HTML Canvas wo gerendert wird
+    private statusElement: HTMLElement;     // Status-Text Element
 
-    // Three.js Objekte für Szenen-Definition
-    private scene: THREE.Scene;
-    private camera: THREE.PerspectiveCamera;
-    private sphere: THREE.Mesh;
+    // WebGPU Core-Objekte
+    private device: GPUDevice | null = null;        // GPU-Device
+    private context: GPUCanvasContext | null = null; // Canvas-Kontext für WebGPU
 
-    // WebGPU Pipeline
-    private computePipeline: GPUComputePipeline | null = null;
-    private renderPipeline: GPURenderPipeline | null = null;
+    // Three.js Szenen-Objekte (für einfache 3D-Mathematik)
+    private scene: THREE.Scene;              // Three.js Szene (Container)
+    private camera: THREE.PerspectiveCamera; // Three.js Kamera (für Berechnungen)
+    private sphere: THREE.Mesh;              // Three.js Kugel (für Parameter)
 
-    private computeBindGroup: GPUBindGroup | null = null;
-    private renderBindGroup: GPUBindGroup | null = null;
+    // WebGPU Rendering-Pipeline
+    private computePipeline: GPUComputePipeline | null = null;  // Raytracing-Pipeline
+    private renderPipeline: GPURenderPipeline | null = null;    // Display-Pipeline
 
-    private renderTexture: GPUTexture | null = null;
-    private sampler: GPUSampler | null = null;
+    // WebGPU Bind Groups (verbinden Shader mit Daten)
+    private computeBindGroup: GPUBindGroup | null = null;  // Daten für Compute Shader
+    private renderBindGroup: GPUBindGroup | null = null;   // Daten für Render Shader
 
-    private cameraBuffer: GPUBuffer | null = null;
-    private sphereBuffer: GPUBuffer | null = null;
-    private renderInfoBuffer: GPUBuffer | null = null;
+    // WebGPU Texturen und Sampler
+    private renderTexture: GPUTexture | null = null;  // Zwischenspeicher für Raytracing-Ergebnis
+    private sampler: GPUSampler | null = null;         // Wie Texturen gelesen werden
+
+    // WebGPU Buffers (GPU-Speicher für Daten)
+    private cameraBuffer: GPUBuffer | null = null;     // Kamera-Daten auf GPU
+    private sphereBuffer: GPUBuffer | null = null;     // Kugel-Daten auf GPU
+    private renderInfoBuffer: GPUBuffer | null = null; // Bildschirm-Info auf GPU
+
 
     constructor() {
+        // DOM-Elemente finden
         this.canvas = document.getElementById('canvas') as HTMLCanvasElement;
         this.statusElement = document.getElementById('status')!;
 
-        // Three.js Szene erstellen
+        // ===== THREE.JS SZENE AUFBAUEN =====
+        // (Three.js wird nur für Mathematik verwendet, nicht für Rendering)
+
+        // Leere Szene erstellen
         this.scene = new THREE.Scene();
 
-        // Three.js Kamera
+        // Perspektiv-Kamera erstellen
         this.camera = new THREE.PerspectiveCamera(
-            60, // FOV
-            this.canvas.width / this.canvas.height, // Aspect
-            0.1, // Near
-            100 // Far
+            60, // FOV (Field of View) in Grad
+            this.canvas.width / this.canvas.height, // Seitenverhältnis
+            0.1, // Near Clipping Plane (unwichtig für Raytracing)
+            100  // Far Clipping Plane (unwichtig für Raytracing)
         );
+        // Kamera positionieren: 5 Einheiten vor dem Ursprung
         this.camera.position.set(0, 0, 5);
-        this.camera.lookAt(0, 0, 0);
+        this.camera.lookAt(0, 0, 0);  // Kamera schaut zum Ursprung
 
-        // Three.js Kugel
-        const geometry = new THREE.SphereGeometry(1, 32, 32);
-        const material = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+        // Kugel erstellen
+        const geometry = new THREE.SphereGeometry(1, 32, 32);  // Radius=1, Details unwichtig
+        const material = new THREE.MeshBasicMaterial({ color: 0x0000ff }); // Blau
         this.sphere = new THREE.Mesh(geometry, material);
-        this.sphere.position.set(0, 0, 0);
-        this.scene.add(this.sphere);
+        this.sphere.position.set(0, 0, 0);  // Kugel im Ursprung platzieren
+        this.scene.add(this.sphere);        // Zur Szene hinzufügen
 
+        // Debug-Ausgaben
         console.log('📐 Three.js Szene erstellt:');
         console.log('  Kamera Position:', this.camera.position);
         console.log('  Kugel Position:', this.sphere.position);
         console.log('  Kugel Radius:', geometry.parameters.radius);
 
+        // WebGPU initialisieren
         this.init();
     }
 
+    // ===== HAUPTINITIALISIERUNG =====
     private async init(): Promise<void> {
         try {
+            // Status-Updates für den Benutzer
             this.updateStatus('WebGPU Raytracer wird initialisiert...', 'info-text');
+
+            // Schritt 1: WebGPU initialisieren
             await this.initWebGPU();
+
+            // Schritt 2: Rendering-Pipelines erstellen
             await this.initPipelines();
+
+            // Schritt 3: Einen Frame rendern
             await this.render();
+
+            // Erfolgsmeldung
             this.updateStatus('✅ WebGPU Raytracer läuft!', 'success');
         } catch (error) {
+            // Fehlerbehandlung
             console.error('Fehler:', error);
             this.updateStatus(`❌ Fehler: ${error instanceof Error ? error.message : 'Unbekannt'}`, 'error');
         }
     }
 
+    // ===== WEBGPU GRUNDINITIALISIERUNG =====
     private async initWebGPU(): Promise<void> {
+        // WebGPU-Unterstützung prüfen
         if (!navigator.gpu) {
             throw new Error('WebGPU nicht verfügbar');
         }
 
-        const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        // GPU-Adapter anfordern (wählt beste verfügbare GPU)
+        const adapter = await navigator.gpu.requestAdapter({
+            powerPreference: 'high-performance'  // Bevorzuge leistungsstarke GPU
+        });
         if (!adapter) throw new Error('Kein WebGPU Adapter');
 
+        // GPU-Device anfordern (ermöglicht Zugriff auf GPU-Features)
         this.device = await adapter.requestDevice();
 
+        // Fehlerbehandlung für WebGPU-Fehler
         this.device.addEventListener('uncapturederror', (event) => {
             console.error('WebGPU Error:', (event as any).error);
         });
 
+        // Canvas für WebGPU konfigurieren
         this.context = this.canvas.getContext('webgpu') as GPUCanvasContext;
-
         const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
         this.context.configure({
-            device: this.device,
-            format: presentationFormat,
-            alphaMode: 'opaque'
+            device: this.device,                // Unser GPU-Device
+            format: presentationFormat,         // Optimales Pixel-Format
+            alphaMode: 'opaque'                // Keine Transparenz
         });
 
         console.log('✅ WebGPU initialisiert');
     }
 
+    // ===== RENDERING-PIPELINES ERSTELLEN =====
     private async initPipelines(): Promise<void> {
         if (!this.device) throw new Error('Device nicht initialisiert');
 
-        // Shader Module
+        // ===== SHADER-MODULE ERSTELLEN =====
+        const computeShaderCode = await fetch('src/shader/compute.wgsl').then(r => r.text());
+        const renderShaderCode = await fetch('src/shader/render.wgsl').then(r => r.text());
+
+        // Compute Shader kompilieren (WGSL → GPU-Code)
         const computeModule = this.device.createShaderModule({
             label: 'Raytracer Compute Shader',
-            code: COMPUTE_SHADER
+            code: computeShaderCode
         });
 
+        // Render Shader kompilieren (WGSL → GPU-Code)
         const renderModule = this.device.createShaderModule({
             label: 'Render Shader',
-            code: RENDER_SHADER
+            code: renderShaderCode
         });
 
-        // Render Texture
+        // ===== RENDER-TEXTURE ERSTELLEN =====
+        // Zwischenspeicher für Raytracing-Ergebnis
         this.renderTexture = this.device.createTexture({
             label: 'Render Texture',
-            size: [this.canvas.width, this.canvas.height],
-            format: 'rgba8unorm',
-            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
+            size: [this.canvas.width, this.canvas.height],  // Gleiche Größe wie Canvas
+            format: 'rgba8unorm',                           // 8-Bit pro Kanal, normalisiert
+            usage: GPUTextureUsage.STORAGE_BINDING |        // Compute Shader kann schreiben
+                GPUTextureUsage.TEXTURE_BINDING          // Render Shader kann lesen
         });
 
-        // Sampler
+        // ===== SAMPLER ERSTELLEN =====
+        // Bestimmt wie Texturen gelesen werden
         this.sampler = this.device.createSampler({
-            magFilter: 'linear',
-            minFilter: 'linear'
+            magFilter: 'linear',  // Glättung bei Vergrößerung
+            minFilter: 'linear'   // Glättung bei Verkleinerung
         });
 
-        // Buffers erstellen und mit Three.js Daten füllen
+        // ===== GPU-BUFFERS ERSTELLEN =====
+        // Lädt Three.js-Daten in GPU-Speicher
         this.createBuffers();
 
-        // Compute Pipeline
+        // ===== COMPUTE PIPELINE ERSTELLEN =====
+        // Layout definieren: Welche Daten bekommt der Compute Shader?
         const computeBindGroupLayout = this.device.createBindGroupLayout({
             entries: [
+                // Binding 0: Kamera-Daten (uniform buffer)
                 { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                // Binding 1: Kugel-Daten (uniform buffer)
                 { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                // Binding 2: Render-Info (uniform buffer)
                 { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                // Binding 3: Output-Texture (storage texture, write-only)
                 {
-                    binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: {
-                        access: 'write-only',
-                        format: 'rgba8unorm',
-                        viewDimension: '2d'
+                    binding: 3,
+                    visibility: GPUShaderStage.COMPUTE,
+                    storageTexture: {
+                        access: 'write-only',    // Nur schreiben
+                        format: 'rgba8unorm',    // Format muss mit Texture übereinstimmen
+                        viewDimension: '2d'      // 2D-Texture
                     }
                 }
             ]
         });
 
+        // Compute Pipeline erstellen
         this.computePipeline = this.device.createComputePipeline({
             label: 'Compute Pipeline',
             layout: this.device.createPipelineLayout({
-                bindGroupLayouts: [computeBindGroupLayout]
+                bindGroupLayouts: [computeBindGroupLayout]  // Unser Layout verwenden
             }),
             compute: {
-                module: computeModule,
-                entryPoint: 'main'
+                module: computeModule,  // Unser kompilierter Compute Shader
+                entryPoint: 'main'      // Einstiegspunkt im Shader
             }
         });
 
+        // Bind Group erstellen: Verbindet konkrete Daten mit dem Layout
         this.computeBindGroup = this.device.createBindGroup({
             layout: computeBindGroupLayout,
             entries: [
-                { binding: 0, resource: { buffer: this.cameraBuffer! } },
-                { binding: 1, resource: { buffer: this.sphereBuffer! } },
-                { binding: 2, resource: { buffer: this.renderInfoBuffer! } },
-                { binding: 3, resource: this.renderTexture.createView() }
+                { binding: 0, resource: { buffer: this.cameraBuffer! } },      // Kamera-Buffer
+                { binding: 1, resource: { buffer: this.sphereBuffer! } },      // Kugel-Buffer
+                { binding: 2, resource: { buffer: this.renderInfoBuffer! } },  // Render-Info-Buffer
+                { binding: 3, resource: this.renderTexture.createView() }      // Output-Texture
             ]
         });
 
-        // Render Pipeline
+        // ===== RENDER PIPELINE ERSTELLEN =====
+        // Layout für Render Shader
         const renderBindGroupLayout = this.device.createBindGroupLayout({
             entries: [
+                // Binding 0: Input-Texture (das Raytracing-Ergebnis)
                 { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+                // Binding 1: Sampler (wie die Texture gelesen wird)
                 { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} }
             ]
         });
 
+        // Render Pipeline erstellen
         this.renderPipeline = this.device.createRenderPipeline({
             label: 'Render Pipeline',
             layout: this.device.createPipelineLayout({
                 bindGroupLayouts: [renderBindGroupLayout]
             }),
+            // Vertex Shader Konfiguration
             vertex: {
                 module: renderModule,
-                entryPoint: 'vs_main'
+                entryPoint: 'vs_main'  // Vertex Shader Einstiegspunkt
             },
+            // Fragment Shader Konfiguration
             fragment: {
                 module: renderModule,
-                entryPoint: 'fs_main',
+                entryPoint: 'fs_main',  // Fragment Shader Einstiegspunkt
                 targets: [{
-                    format: navigator.gpu.getPreferredCanvasFormat()
+                    format: navigator.gpu.getPreferredCanvasFormat()  // Canvas-Format
                 }]
             },
+            // Primitive-Konfiguration
             primitive: {
-                topology: 'triangle-list'
+                topology: 'triangle-list'  // Wir zeichnen Dreiecke
             }
         });
 
+        // Bind Group für Render Pipeline
         this.renderBindGroup = this.device.createBindGroup({
             layout: renderBindGroupLayout,
             entries: [
-                { binding: 0, resource: this.renderTexture.createView() },
-                { binding: 1, resource: this.sampler }
+                { binding: 0, resource: this.renderTexture.createView() },  // Raytracing-Ergebnis
+                { binding: 1, resource: this.sampler }                      // Sampler
             ]
         });
 
         console.log('✅ Pipelines erstellt');
     }
 
+    // ===== GPU-BUFFERS ERSTELLEN UND FÜLLEN =====
     private createBuffers(): void {
         if (!this.device) return;
 
-        // Kamera Buffer - Daten von Three.js Kamera
+        // ===== KAMERA-BUFFER =====
+        // GPU-Buffer für Kamera-Daten erstellen
         this.cameraBuffer = this.device.createBuffer({
             label: 'Camera Buffer',
-            size: 32,
+            size: 32,  // 8 floats × 4 bytes = 32 bytes
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        // Three.js Kamera-Target berechnen
-        const lookAtTarget = new THREE.Vector3(0, 0, 0);
+        // Kamera-Ziel berechnen (wo schaut die Kamera hin?)
+        const lookAtTarget = new THREE.Vector3(0, 0, 0);  // Ursprung
 
+        // Kamera-Daten in Float32Array packen
         const cameraData = new Float32Array([
-            this.camera.position.x, this.camera.position.y, this.camera.position.z, 0,  // position + padding
-            lookAtTarget.x, lookAtTarget.y, lookAtTarget.z, 0  // lookAt + padding
+            // Position (xyz) + Padding
+            this.camera.position.x, this.camera.position.y, this.camera.position.z, 0,
+            // LookAt (xyz) + Padding  
+            lookAtTarget.x, lookAtTarget.y, lookAtTarget.z, 0
         ]);
+        // Daten zur GPU senden
         this.device.queue.writeBuffer(this.cameraBuffer, 0, cameraData);
 
-        // Kugel Buffer - Daten von Three.js Sphere
+        // ===== KUGEL-BUFFER =====
+        // GPU-Buffer für Kugel-Daten erstellen
         this.sphereBuffer = this.device.createBuffer({
             label: 'Sphere Buffer',
-            size: 16,
+            size: 16,  // 4 floats × 4 bytes = 16 bytes
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
+        // Kugel-Parameter aus Three.js extrahieren
         const sphereGeometry = this.sphere.geometry as THREE.SphereGeometry;
         const radius = sphereGeometry.parameters.radius;
 
+        // Kugel-Daten in Float32Array packen
         const sphereData = new Float32Array([
+            // Center (xyz) + Radius
             this.sphere.position.x,
             this.sphere.position.y,
             this.sphere.position.z,
             radius
         ]);
+        // Daten zur GPU senden
         this.device.queue.writeBuffer(this.sphereBuffer, 0, sphereData);
 
-        // Render Info Buffer
+        // ===== RENDER-INFO-BUFFER =====
+        // GPU-Buffer für Bildschirm-Informationen
         this.renderInfoBuffer = this.device.createBuffer({
             label: 'Render Info Buffer',
-            size: 16,
+            size: 16,  // 4 uints × 4 bytes = 16 bytes
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
+        // Bildschirm-Daten in Uint32Array packen
         const renderInfoData = new Uint32Array([
-            this.canvas.width,
-            this.canvas.height,
-            0, 0
+            this.canvas.width,   // Breite
+            this.canvas.height,  // Höhe
+            0, 0                // Padding
         ]);
+        // Daten zur GPU senden
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
 
+        // Debug-Ausgaben
         console.log('✅ Buffers mit Three.js Daten gefüllt');
         console.log('  Kamera Buffer:', cameraData);
         console.log('  Kugel Buffer:', sphereData);
     }
 
+    // ===== RENDERING DURCHFÜHREN =====
     private async render(): Promise<void> {
         if (!this.device || !this.computePipeline || !this.renderPipeline) return;
 
+        // Command Encoder erstellen (sammelt GPU-Befehle)
         const commandEncoder = this.device.createCommandEncoder();
 
-        // Compute Pass - Raytracing
+        // ===== COMPUTE PASS: RAYTRACING =====
+        // GPU berechnet für jeden Pixel die Farbe
         const computePass = commandEncoder.beginComputePass();
-        computePass.setPipeline(this.computePipeline);
-        computePass.setBindGroup(0, this.computeBindGroup!);
+        computePass.setPipeline(this.computePipeline);           // Compute Pipeline verwenden
+        computePass.setBindGroup(0, this.computeBindGroup!);     // Daten bereitstellen
 
-        const workgroupsX = Math.ceil(this.canvas.width / 8);
-        const workgroupsY = Math.ceil(this.canvas.height / 8);
+        // Berechnen wie viele Workgroups wir brauchen
+        // Jede Workgroup bearbeitet 8×8 Pixel (siehe @workgroup_size im Shader)
+        const workgroupsX = Math.ceil(this.canvas.width / 8);   // Horizontal
+        const workgroupsY = Math.ceil(this.canvas.height / 8);  // Vertikal
+
+        // Compute Shader ausführen
         computePass.dispatchWorkgroups(workgroupsX, workgroupsY);
         computePass.end();
 
-        // Render Pass - Texture auf Canvas
+        // ===== RENDER PASS: ANZEIGE =====
+        // Raytracing-Ergebnis auf Canvas zeichnen
         const textureView = this.context!.getCurrentTexture().createView();
         const renderPass = commandEncoder.beginRenderPass({
             colorAttachments: [{
-                view: textureView,
-                clearValue: { r: 0, g: 0, b: 0, a: 1 },
-                loadOp: 'clear',
-                storeOp: 'store'
+                view: textureView,                          // Canvas als Ziel
+                clearValue: { r: 0, g: 0, b: 0, a: 1 },   // Schwarz löschen
+                loadOp: 'clear',                           // Löschen vor dem Zeichnen
+                storeOp: 'store'                           // Ergebnis speichern
             }]
         });
 
-        renderPass.setPipeline(this.renderPipeline);
-        renderPass.setBindGroup(0, this.renderBindGroup!);
-        renderPass.draw(3); // Fullscreen triangle
+        renderPass.setPipeline(this.renderPipeline);        // Render Pipeline verwenden
+        renderPass.setBindGroup(0, this.renderBindGroup!);  // Texture und Sampler bereitstellen
+        renderPass.draw(3);  // 3 Vertices = 1 Dreieck das den ganzen Bildschirm abdeckt
         renderPass.end();
 
+        // ===== BEFEHLE AUSFÜHREN =====
+        // Alle gesammelten Befehle zur GPU senden
         this.device.queue.submit([commandEncoder.finish()]);
 
         console.log('✅ Frame gerendert');
     }
 
+    // ===== STATUS-ANZEIGE AKTUALISIEREN =====
     private updateStatus(message: string, className: string): void {
-        this.statusElement.textContent = message;
-        this.statusElement.className = `status ${className}`;
+        this.statusElement.textContent = message;                    // Text setzen
+        this.statusElement.className = `status ${className}`;        // CSS-Klasse setzen
     }
 }
 
-// App starten
+// ===== APP STARTEN =====
 console.log('🚀 Starte WebGPU Raytracer mit Three.js Szene...');
 new StorageBufferWebGPURaytracer();
