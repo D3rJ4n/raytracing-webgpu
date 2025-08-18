@@ -1,0 +1,719 @@
+import * as THREE from 'three';
+
+// ===== HAUPTKLASSE: StorageBufferWebGPURaytracer =====
+class StorageBufferWebGPURaytracer {
+    // DOM-Elemente
+    private canvas: HTMLCanvasElement;      // HTML Canvas wo gerendert wird
+    private statusElement: HTMLElement;     // Status-Text Element
+
+    // WebGPU Core-Objekte
+    private device: GPUDevice | null = null;        // GPU-Device
+    private context: GPUCanvasContext | null = null; // Canvas-Kontext für WebGPU
+
+    // Three.js Szenen-Objekte (für einfache 3D-Mathematik)
+    private scene: THREE.Scene;              // Three.js Szene (Container)
+    private camera: THREE.PerspectiveCamera; // Three.js Kamera (für Berechnungen)
+    private sphere: THREE.Mesh;              // Three.js Kugel (für Parameter)
+
+    // WebGPU Rendering-Pipeline
+    private computePipeline: GPUComputePipeline | null = null;  // Raytracing-Pipeline
+    private renderPipeline: GPURenderPipeline | null = null;    // Display-Pipeline
+
+    // WebGPU Bind Groups (verbinden Shader mit Daten)
+    private computeBindGroup: GPUBindGroup | null = null;  // Daten für Compute Shader
+    private renderBindGroup: GPUBindGroup | null = null;   // Daten für Render Shader
+
+    // WebGPU Texturen und Sampler
+    private renderTexture: GPUTexture | null = null;  // Zwischenspeicher für Raytracing-Ergebnis
+    private sampler: GPUSampler | null = null;         // Wie Texturen gelesen werden
+
+    // WebGPU Buffers (GPU-Speicher für Daten)
+    private cameraBuffer: GPUBuffer | null = null;     // Kamera-Daten auf GPU
+    private sphereBuffer: GPUBuffer | null = null;     // Kugel-Daten auf GPU
+    private renderInfoBuffer: GPUBuffer | null = null; // Bildschirm-Info auf GPU
+
+    // ===== CACHE-BUFFER =====
+    private pixelCacheBuffer: GPUBuffer | null = null;  // Cache-Buffer
+
+    // Debug Counter
+    private frameCount: number = 0;
+
+    // ===== CACHE PERFORMANCE MONITORING =====
+    private cacheStats = {
+        totalPixels: 0,
+        cacheHits: 0,
+        cacheMisses: 0
+    };
+
+    constructor() {
+        console.log('🚀 [INIT] Starte WebGPU Raytracer mit Cache...');
+
+        // DOM-Elemente finden
+        this.canvas = document.getElementById('canvas') as HTMLCanvasElement;
+        this.statusElement = document.getElementById('status')!;
+
+        console.log('🟡 [INIT] Canvas gefunden:', this.canvas.width, 'x', this.canvas.height);
+
+        // ===== THREE.JS SZENE AUFBAUEN =====
+        console.log('🟡 [INIT] Erstelle Three.js Szene...');
+
+        // Leere Szene erstellen
+        this.scene = new THREE.Scene();
+
+        // Perspektiv-Kamera erstellen
+        this.camera = new THREE.PerspectiveCamera(
+            60, // FOV (Field of View) in Grad
+            this.canvas.width / this.canvas.height, // Seitenverhältnis
+            0.1, // Near Clipping Plane (unwichtig für Raytracing)
+            100  // Far Clipping Plane (unwichtig für Raytracing)
+        );
+        // Kamera positionieren: 5 Einheiten vor dem Ursprung
+        this.camera.position.set(0, 0, 5);
+        this.camera.lookAt(0, 0, 0);  // Kamera schaut zum Ursprung
+
+        // Kugel erstellen
+        const geometry = new THREE.SphereGeometry(1, 32, 32);  // Radius=1, Details unwichtig
+        const material = new THREE.MeshBasicMaterial({ color: 0x0000ff }); // Blau
+        this.sphere = new THREE.Mesh(geometry, material);
+        this.sphere.position.set(0, 0, 0);  // Kugel im Ursprung platzieren
+        this.scene.add(this.sphere);        // Zur Szene hinzufügen
+
+        console.log('🟢 [INIT] Three.js Szene erstellt');
+        console.log('  Kamera Position:', this.camera.position);
+        console.log('  Kugel Position:', this.sphere.position);
+        console.log('  Kugel Radius:', geometry.parameters.radius);
+
+        // WebGPU initialisieren
+        this.init();
+    }
+
+    // ===== HAUPTINITIALISIERUNG =====
+    private async init(): Promise<void> {
+        try {
+            // Status-Updates für den Benutzer
+            this.updateStatus('WebGPU Raytracer wird initialisiert...', 'info-text');
+
+            // Schritt 1: WebGPU initialisieren
+            console.log('🟡 [INIT] Initialisiere WebGPU...');
+            await this.initWebGPU();
+
+            // Schritt 2: Rendering-Pipelines erstellen
+            console.log('🟡 [INIT] Erstelle Pipelines...');
+            await this.initPipelines();
+
+            // Schritt 3: Ersten Frame rendern
+            console.log('🟡 [INIT] Rendere ersten Frame...');
+            await this.renderWithCacheStats();
+
+            // Cache-Debug-Test automatisch starten
+            setTimeout(() => {
+                console.log('🧪 [TEST] Starte automatischen Cache-Debug-Test...');
+                this.debugCacheTest();
+            }, 1000);
+
+            // Erfolgsmeldung
+            this.updateStatus('✅ WebGPU Raytracer mit Cache läuft!', 'success');
+        } catch (error) {
+            // Fehlerbehandlung
+            console.error('❌ [ERROR] Fehler bei Initialisierung:', error);
+            this.updateStatus(`❌ Fehler: ${error instanceof Error ? error.message : 'Unbekannt'}`, 'error');
+        }
+    }
+
+    // ===== WEBGPU GRUNDINITIALISIERUNG =====
+    private async initWebGPU(): Promise<void> {
+        // WebGPU-Unterstützung prüfen
+        if (!navigator.gpu) {
+            throw new Error('WebGPU nicht verfügbar');
+        }
+
+        // GPU-Adapter anfordern (wählt beste verfügbare GPU)
+        const adapter = await navigator.gpu.requestAdapter({
+            powerPreference: 'high-performance'  // Bevorzuge leistungsstarke GPU
+        });
+        if (!adapter) throw new Error('Kein WebGPU Adapter');
+
+        // GPU-Device anfordern (ermöglicht Zugriff auf GPU-Features)
+        this.device = await adapter.requestDevice();
+
+        // Fehlerbehandlung für WebGPU-Fehler
+        this.device.addEventListener('uncapturederror', (event) => {
+            console.error('❌ [WEBGPU] Unbehandelter Fehler:', (event as any).error);
+        });
+
+        // Canvas für WebGPU konfigurieren
+        this.context = this.canvas.getContext('webgpu') as GPUCanvasContext;
+        const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+        this.context.configure({
+            device: this.device,                // Unser GPU-Device
+            format: presentationFormat,         // Optimales Pixel-Format
+            alphaMode: 'opaque'                // Keine Transparenz
+        });
+
+        console.log('🟢 [WEBGPU] WebGPU erfolgreich initialisiert');
+    }
+
+    // ===== RENDERING-PIPELINES ERSTELLEN =====
+    private async initPipelines(): Promise<void> {
+        if (!this.device) throw new Error('Device nicht initialisiert');
+
+        // ===== SHADER-MODULE ERSTELLEN =====
+        console.log('🟡 [PIPELINE] Lade Shader...');
+
+        // WGSL Shader aus Dateien laden
+        const computeShaderCode = await fetch('src/shader/compute.wgsl').then(r => r.text());
+        const renderShaderCode = await fetch('src/shader/render.wgsl').then(r => r.text());
+
+        console.log('🟢 [PIPELINE] Shader geladen');
+
+        // Compute Shader kompilieren (WGSL → GPU-Code)
+        const computeModule = this.device.createShaderModule({
+            label: 'Raytracer Compute Shader',
+            code: computeShaderCode
+        });
+
+        // Render Shader kompilieren (WGSL → GPU-Code)
+        const renderModule = this.device.createShaderModule({
+            label: 'Render Shader',
+            code: renderShaderCode
+        });
+
+        console.log('🟢 [PIPELINE] Shader kompiliert');
+
+        // ===== RENDER-TEXTURE ERSTELLEN =====
+        console.log('🟡 [PIPELINE] Erstelle Render-Texture...');
+
+        // Zwischenspeicher für Raytracing-Ergebnis
+        this.renderTexture = this.device.createTexture({
+            label: 'Render Texture',
+            size: [this.canvas.width, this.canvas.height],  // Gleiche Größe wie Canvas
+            format: 'rgba8unorm',                           // 8-Bit pro Kanal, normalisiert
+            usage: GPUTextureUsage.STORAGE_BINDING |        // Compute Shader kann schreiben
+                GPUTextureUsage.TEXTURE_BINDING          // Render Shader kann lesen
+        });
+
+        // ===== SAMPLER ERSTELLEN =====
+        // Bestimmt wie Texturen gelesen werden
+        this.sampler = this.device.createSampler({
+            magFilter: 'linear',  // Glättung bei Vergrößerung
+            minFilter: 'linear'   // Glättung bei Verkleinerung
+        });
+
+        console.log('🟢 [PIPELINE] Textur und Sampler erstellt');
+
+        // ===== GPU-BUFFERS ERSTELLEN =====
+        console.log('🟡 [PIPELINE] Erstelle GPU-Buffers...');
+        this.createBuffers();
+
+        // ===== COMPUTE PIPELINE ERSTELLEN =====
+        console.log('🟡 [PIPELINE] Erstelle Compute Pipeline...');
+
+        // Layout definieren: Welche Daten bekommt der Compute Shader?
+        const computeBindGroupLayout = this.device.createBindGroupLayout({
+            entries: [
+                // Binding 0: Kamera-Daten (uniform buffer)
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                // Binding 1: Kugel-Daten (uniform buffer)
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                // Binding 2: Render-Info (uniform buffer)
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                // Binding 3: Output-Texture (storage texture, write-only)
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.COMPUTE,
+                    storageTexture: {
+                        access: 'write-only',    // Nur schreiben
+                        format: 'rgba8unorm',    // Format muss mit Texture übereinstimmen
+                        viewDimension: '2d'      // 2D-Texture
+                    }
+                },
+                // ===== CACHE-BINDING =====
+                {
+                    binding: 4,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'storage' }  // Cache-Buffer
+                }
+            ]
+        });
+
+        console.log('🟢 [PIPELINE] Compute Bind Group Layout erstellt (mit Cache)');
+
+        // Compute Pipeline erstellen
+        this.computePipeline = this.device.createComputePipeline({
+            label: 'Compute Pipeline',
+            layout: this.device.createPipelineLayout({
+                bindGroupLayouts: [computeBindGroupLayout]  // Unser Layout verwenden
+            }),
+            compute: {
+                module: computeModule,  // Unser kompilierter Compute Shader
+                entryPoint: 'main'      // Einstiegspunkt im Shader
+            }
+        });
+
+        // Bind Group erstellen: Verbindet konkrete Daten mit dem Layout
+        this.computeBindGroup = this.device.createBindGroup({
+            layout: computeBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.cameraBuffer! } },              // Kamera-Buffer
+                { binding: 1, resource: { buffer: this.sphereBuffer! } },              // Kugel-Buffer
+                { binding: 2, resource: { buffer: this.renderInfoBuffer! } },          // Render-Info-Buffer
+                { binding: 3, resource: this.renderTexture.createView() },             // Output-Texture
+                { binding: 4, resource: { buffer: this.pixelCacheBuffer! } }           // Cache-Buffer
+            ]
+        });
+
+        console.log('🟢 [PIPELINE] Compute Pipeline mit Cache erstellt');
+
+        // ===== RENDER PIPELINE ERSTELLEN =====
+        console.log('🟡 [PIPELINE] Erstelle Render Pipeline...');
+
+        // Layout für Render Shader
+        const renderBindGroupLayout = this.device.createBindGroupLayout({
+            entries: [
+                // Binding 0: Input-Texture (das Raytracing-Ergebnis)
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+                // Binding 1: Sampler (wie die Texture gelesen wird)
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} }
+            ]
+        });
+
+        // Render Pipeline erstellen
+        this.renderPipeline = this.device.createRenderPipeline({
+            label: 'Render Pipeline',
+            layout: this.device.createPipelineLayout({
+                bindGroupLayouts: [renderBindGroupLayout]
+            }),
+            // Vertex Shader Konfiguration
+            vertex: {
+                module: renderModule,
+                entryPoint: 'vs_main'  // Vertex Shader Einstiegspunkt
+            },
+            // Fragment Shader Konfiguration
+            fragment: {
+                module: renderModule,
+                entryPoint: 'fs_main',  // Fragment Shader Einstiegspunkt
+                targets: [{
+                    format: navigator.gpu.getPreferredCanvasFormat()  // Canvas-Format
+                }]
+            },
+            // Primitive-Konfiguration
+            primitive: {
+                topology: 'triangle-list'  // Wir zeichnen Dreiecke
+            }
+        });
+
+        // Bind Group für Render Pipeline
+        this.renderBindGroup = this.device.createBindGroup({
+            layout: renderBindGroupLayout,
+            entries: [
+                { binding: 0, resource: this.renderTexture.createView() },  // Raytracing-Ergebnis
+                { binding: 1, resource: this.sampler }                      // Sampler
+            ]
+        });
+
+        console.log('🟢 [PIPELINE] Alle Pipelines erfolgreich erstellt');
+    }
+
+    // ===== GPU-BUFFERS ERSTELLEN UND FÜLLEN =====
+    private createBuffers(): void {
+        if (!this.device) return;
+
+        // ===== KAMERA-BUFFER =====
+        console.log('🟡 [BUFFER] Erstelle Kamera-Buffer...');
+
+        // GPU-Buffer für Kamera-Daten erstellen
+        this.cameraBuffer = this.device.createBuffer({
+            label: 'Camera Buffer',
+            size: 32,  // 8 floats × 4 bytes = 32 bytes
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        // Kamera-Ziel berechnen (wo schaut die Kamera hin?)
+        const lookAtTarget = new THREE.Vector3(0, 0, 0);  // Ursprung
+
+        // Kamera-Daten in Float32Array packen
+        const cameraData = new Float32Array([
+            // Position (xyz) + Padding
+            this.camera.position.x, this.camera.position.y, this.camera.position.z, 0,
+            // LookAt (xyz) + Padding  
+            lookAtTarget.x, lookAtTarget.y, lookAtTarget.z, 0
+        ]);
+        // Daten zur GPU senden
+        this.device.queue.writeBuffer(this.cameraBuffer, 0, cameraData);
+
+        console.log('🟢 [BUFFER] Kamera-Buffer:', cameraData);
+
+        // ===== KUGEL-BUFFER =====
+        console.log('🟡 [BUFFER] Erstelle Kugel-Buffer...');
+
+        // GPU-Buffer für Kugel-Daten erstellen
+        this.sphereBuffer = this.device.createBuffer({
+            label: 'Sphere Buffer',
+            size: 16,  // 4 floats × 4 bytes = 16 bytes
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        // Kugel-Parameter aus Three.js extrahieren
+        const sphereGeometry = this.sphere.geometry as THREE.SphereGeometry;
+        const radius = sphereGeometry.parameters.radius;
+
+        // Kugel-Daten in Float32Array packen
+        const sphereData = new Float32Array([
+            // Center (xyz) + Radius
+            this.sphere.position.x,
+            this.sphere.position.y,
+            this.sphere.position.z,
+            radius
+        ]);
+        // Daten zur GPU senden
+        this.device.queue.writeBuffer(this.sphereBuffer, 0, sphereData);
+
+        console.log('🟢 [BUFFER] Kugel-Buffer:', sphereData);
+
+        // ===== RENDER-INFO-BUFFER =====
+        console.log('🟡 [BUFFER] Erstelle Render-Info-Buffer...');
+
+        // GPU-Buffer für Bildschirm-Informationen
+        this.renderInfoBuffer = this.device.createBuffer({
+            label: 'Render Info Buffer',
+            size: 16,  // 4 uints × 4 bytes = 16 bytes
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        // Bildschirm-Daten in Uint32Array packen
+        const renderInfoData = new Uint32Array([
+            this.canvas.width,   // Breite
+            this.canvas.height,  // Höhe
+            0, 0                // Padding
+        ]);
+        // Daten zur GPU senden
+        this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
+
+        console.log('🟢 [BUFFER] Render-Info-Buffer:', renderInfoData);
+
+        // ===== ECHTER FARB-CACHE-BUFFER =====
+        console.log('🟡 [CACHE] Erstelle Farb-Cache-Buffer...');
+
+        const pixelCount = this.canvas.width * this.canvas.height;
+        console.log(`🟡 [CACHE] Pixel-Anzahl: ${pixelCount}`);
+
+        // Farb-Cache: Pro Pixel 4 uint (16 bytes): [R, G, B, Valid]
+        this.pixelCacheBuffer = this.device.createBuffer({
+            label: 'Color Cache Buffer',
+            size: pixelCount * 16,  // 4 uints × 4 bytes = 16 bytes pro Pixel
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+        });
+
+        // Cache explizit auf 0 (INVALID) setzen
+        const cacheData = new Uint32Array(pixelCount * 4).fill(0);
+        this.device.queue.writeBuffer(this.pixelCacheBuffer, 0, cacheData);
+
+        console.log('🟢 [CACHE] Farb-Cache-Buffer erstellt und auf INVALID (0) gesetzt');
+        console.log(`🟢 [CACHE] Buffer-Größe: ${pixelCount * 16} bytes`);
+        console.log('🟢 [CACHE] Speichert: RGBA-Farben + Valid-Flag pro Pixel');
+
+        console.log('🟢 [BUFFER] Alle Buffers erfolgreich erstellt');
+    }
+
+    // ===== RENDERING DURCHFÜHREN =====
+    private render(): void {
+        this.frameCount++;
+
+        console.log(`\n🎬 [FRAME ${this.frameCount}] Starte Rendering...`);
+        console.log(`🟡 [FRAME ${this.frameCount}] Cache-Buffer: ${this.pixelCacheBuffer ? 'vorhanden' : 'FEHLT!'}`);
+        console.log(`🟡 [FRAME ${this.frameCount}] Compute Pipeline: ${this.computePipeline ? 'vorhanden' : 'FEHLT!'}`);
+        console.log(`🟡 [FRAME ${this.frameCount}] Render Pipeline: ${this.renderPipeline ? 'vorhanden' : 'FEHLT!'}`);
+
+        if (!this.device || !this.computePipeline || !this.renderPipeline) {
+            console.error(`❌ [FRAME ${this.frameCount}] Nicht alle Ressourcen verfügbar!`);
+            return;
+        }
+
+        // Command Encoder erstellen (sammelt GPU-Befehle)
+        const commandEncoder = this.device.createCommandEncoder();
+
+        console.log(`🟡 [FRAME ${this.frameCount}] Starte Compute Pass (Raytracing)...`);
+
+        // ===== COMPUTE PASS: RAYTRACING MIT CACHE =====
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.computePipeline);           // Compute Pipeline verwenden
+        computePass.setBindGroup(0, this.computeBindGroup!);     // Daten bereitstellen
+
+        // Berechnen wie viele Workgroups wir brauchen
+        // Jede Workgroup bearbeitet 8×8 Pixel (siehe @workgroup_size im Shader)
+        const workgroupsX = Math.ceil(this.canvas.width / 8);   // Horizontal
+        const workgroupsY = Math.ceil(this.canvas.height / 8);  // Vertikal
+
+        console.log(`🟡 [FRAME ${this.frameCount}] Workgroups: ${workgroupsX}x${workgroupsY} = ${workgroupsX * workgroupsY}`);
+
+        // Compute Shader ausführen
+        computePass.dispatchWorkgroups(workgroupsX, workgroupsY);
+        computePass.end();
+
+        console.log(`🟡 [FRAME ${this.frameCount}] Starte Render Pass (Anzeige)...`);
+
+        // ===== RENDER PASS: ANZEIGE =====
+        const textureView = this.context!.getCurrentTexture().createView();
+        const renderPass = commandEncoder.beginRenderPass({
+            colorAttachments: [{
+                view: textureView,                          // Canvas als Ziel
+                clearValue: { r: 0, g: 0, b: 0, a: 1 },   // Schwarz löschen
+                loadOp: 'clear',                           // Löschen vor dem Zeichnen
+                storeOp: 'store'                           // Ergebnis speichern
+            }]
+        });
+
+        renderPass.setPipeline(this.renderPipeline);        // Render Pipeline verwenden
+        renderPass.setBindGroup(0, this.renderBindGroup!);  // Texture und Sampler bereitstellen
+        renderPass.draw(3);  // 3 Vertices = 1 Dreieck das den ganzen Bildschirm abdeckt
+        renderPass.end();
+
+        // ===== BEFEHLE AUSFÜHREN =====
+        this.device.queue.submit([commandEncoder.finish()]);
+
+        console.log(`🟢 [FRAME ${this.frameCount}] Rendering erfolgreich abgeschlossen\n`);
+    }
+
+    // ===== CACHE-STATISTIKEN LESEN (KORRIGIERT FÜR FARB-CACHE) =====
+    private async readCacheStats(): Promise<void> {
+        if (!this.device || !this.pixelCacheBuffer) return;
+
+        try {
+            // Staging Buffer erstellen (um Cache-Daten von GPU zu lesen)
+            const stagingBuffer = this.device.createBuffer({
+                size: this.pixelCacheBuffer.size,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+            });
+
+            // Command Encoder für Buffer-Copy
+            const commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(
+                this.pixelCacheBuffer, 0,    // Source
+                stagingBuffer, 0,            // Destination
+                this.pixelCacheBuffer.size   // Size
+            );
+            this.device.queue.submit([commandEncoder.finish()]);
+
+            // Warten bis Copy fertig ist
+            await stagingBuffer.mapAsync(GPUMapMode.READ);
+            const arrayBuffer = stagingBuffer.getMappedRange();
+            const cacheData = new Uint32Array(arrayBuffer);
+
+            // ===== CACHE-STATISTIKEN BERECHNEN (FÜR FARB-CACHE) =====
+            let hits = 0;
+            let misses = 0;
+            const totalPixels = this.canvas.width * this.canvas.height;
+
+            // Bei Farb-Cache: Alle 4 uint pro Pixel prüfen (Valid-Flag ist an Position 3)
+            for (let i = 0; i < totalPixels; i++) {
+                const validFlag = cacheData[i * 4 + 3]; // Valid-Flag an Position 3
+                if (validFlag === 1) {
+                    hits++;
+                } else {
+                    misses++;
+                }
+            }
+
+            // Statistiken aktualisieren
+            this.cacheStats = {
+                totalPixels: totalPixels,
+                cacheHits: hits,
+                cacheMisses: misses
+            };
+
+            // Buffer aufräumen
+            stagingBuffer.unmap();
+            stagingBuffer.destroy();
+
+            // Statistiken in Console ausgeben
+            this.logCacheStats();
+
+        } catch (error) {
+            console.error('❌ [CACHE] Fehler beim Lesen der Cache-Statistiken:', error);
+        }
+    }
+
+    // ===== CACHE-STATISTIKEN ANZEIGEN =====
+    private logCacheStats(): void {
+        const { totalPixels, cacheHits, cacheMisses } = this.cacheStats;
+        const hitRate = totalPixels > 0 ? (cacheHits / totalPixels * 100).toFixed(1) : '0';
+
+        console.log(`\n📊 [CACHE STATS] Frame ${this.frameCount}:`);
+        console.log(`  Total Pixels:  ${totalPixels.toLocaleString()}`);
+        console.log(`  Cache Hits:    ${cacheHits.toLocaleString()} (${hitRate}%)`);
+        console.log(`  Cache Misses:  ${cacheMisses.toLocaleString()}`);
+
+        if (cacheHits > 0) {
+            console.log(`  🎯 Cache Hit Rate: ${hitRate}%`);
+            if (parseFloat(hitRate) > 50) {
+                console.log(`  🚀 Performance: Cache funktioniert gut!`);
+            }
+        }
+    }
+
+    // ===== RENDERING MIT CACHE-MONITORING =====
+    private async renderWithCacheStats(): Promise<void> {
+        // Normales Rendering
+        this.render();
+
+        // Cache-Statistiken nach Rendering lesen (nur alle 10 Frames für Performance)
+        if (this.frameCount % 10 === 0 || this.frameCount <= 4) {
+            setTimeout(async () => {
+                await this.readCacheStats();
+            }, 100); // Kurz warten bis GPU fertig ist
+        }
+    }
+
+    // ===== TEST-METHODE: Cache mit Statistiken testen =====
+    public async testCacheWithStats(): Promise<void> {
+        console.log('🧪 [TEST] Starte Cache-Test mit Performance-Monitoring...');
+
+        await this.renderWithCacheStats(); // Frame 1
+
+        setTimeout(async () => {
+            await this.renderWithCacheStats(); // Frame 2
+
+            setTimeout(async () => {
+                await this.renderWithCacheStats(); // Frame 3
+
+                setTimeout(async () => {
+                    await this.renderWithCacheStats(); // Frame 4
+                    console.log('🏁 [TEST] Cache-Test mit Statistiken abgeschlossen');
+                }, 500);
+            }, 500);
+        }, 500);
+    }
+
+    // ===== CACHE DEBUG TEST =====
+    public async debugCacheTest(): Promise<void> {
+        console.log('\n🔍 [DEBUG] Starte Cache-Debug-Test...');
+
+        if (!this.device || !this.pixelCacheBuffer) {
+            console.error('❌ [DEBUG] Device oder Cache-Buffer nicht verfügbar');
+            return;
+        }
+
+        try {
+            // ===== SCHRITT 1: Cache vor dem ersten Frame prüfen =====
+            console.log('🔍 [DEBUG] Schritt 1: Cache vor erstem Frame prüfen...');
+            await this.inspectCacheDetails(1);
+
+            // ===== SCHRITT 2: Ersten Frame rendern =====
+            console.log('🔍 [DEBUG] Schritt 2: Ersten Frame rendern...');
+            this.render();
+
+            // Kurz warten bis GPU fertig
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // ===== SCHRITT 3: Cache nach dem ersten Frame prüfen =====
+            console.log('🔍 [DEBUG] Schritt 3: Cache nach erstem Frame prüfen...');
+            await this.inspectCacheDetails(2);
+
+            // ===== SCHRITT 4: Zweiten Frame rendern =====
+            console.log('🔍 [DEBUG] Schritt 4: Zweiten Frame rendern...');
+            this.render();
+
+            // Kurz warten bis GPU fertig
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // ===== SCHRITT 5: Cache nach dem zweiten Frame prüfen =====
+            console.log('🔍 [DEBUG] Schritt 5: Cache nach zweitem Frame prüfen...');
+            await this.inspectCacheDetails(3);
+
+        } catch (error) {
+            console.error('❌ [DEBUG] Fehler beim Cache-Debug-Test:', error);
+        }
+    }
+
+    // ===== DETAILLIERTE CACHE-INSPEKTION =====
+    private async inspectCacheDetails(step: number): Promise<void> {
+        if (!this.device || !this.pixelCacheBuffer) return;
+
+        try {
+            // Staging Buffer erstellen
+            const stagingBuffer = this.device.createBuffer({
+                size: this.pixelCacheBuffer.size,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+            });
+
+            // Cache-Daten von GPU kopieren
+            const commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(
+                this.pixelCacheBuffer, 0,
+                stagingBuffer, 0,
+                this.pixelCacheBuffer.size
+            );
+            this.device.queue.submit([commandEncoder.finish()]);
+
+            // Daten lesen
+            await stagingBuffer.mapAsync(GPUMapMode.READ);
+            const arrayBuffer = stagingBuffer.getMappedRange();
+            const cacheData = new Uint32Array(arrayBuffer);
+
+            // ===== DETAILLIERTE ANALYSE =====
+            const totalPixels = this.canvas.width * this.canvas.height;
+            let validPixels = 0;
+            let invalidPixels = 0;
+
+            // Sample: Erste 10 Pixel analysieren
+            console.log(`\n🔍 [DEBUG STEP ${step}] Cache-Details:`);
+            console.log('📊 Sample der ersten 10 Pixel:');
+
+            for (let i = 0; i < Math.min(10, totalPixels); i++) {
+                const baseIndex = i * 4;
+                const r = cacheData[baseIndex + 0];
+                const g = cacheData[baseIndex + 1];
+                const b = cacheData[baseIndex + 2];
+                const valid = cacheData[baseIndex + 3];
+
+                console.log(`  Pixel ${i}: R=${r}, G=${g}, B=${b}, Valid=${valid}`);
+            }
+
+            // Gesamtstatistik
+            for (let i = 0; i < totalPixels; i++) {
+                const validFlag = cacheData[i * 4 + 3];
+                if (validFlag === 1) {
+                    validPixels++;
+                } else {
+                    invalidPixels++;
+                }
+            }
+
+            const hitRate = totalPixels > 0 ? (validPixels / totalPixels * 100).toFixed(1) : '0';
+
+            console.log(`📈 Gesamtstatistik:`);
+            console.log(`  Total Pixels: ${totalPixels.toLocaleString()}`);
+            console.log(`  Valid Pixels: ${validPixels.toLocaleString()} (${hitRate}%)`);
+            console.log(`  Invalid Pixels: ${invalidPixels.toLocaleString()}`);
+
+            // Buffer aufräumen
+            stagingBuffer.unmap();
+            stagingBuffer.destroy();
+
+        } catch (error) {
+            console.error(`❌ [DEBUG] Fehler bei Cache-Inspektion Schritt ${step}:`, error);
+        }
+    }
+
+    // ===== CACHE-RESET-METHODE =====
+    public resetCache(): void {
+        if (!this.device || !this.pixelCacheBuffer) return;
+
+        console.log('🔄 [DEBUG] Setze Cache zurück...');
+        const pixelCount = this.canvas.width * this.canvas.height;
+        const cacheData = new Uint32Array(pixelCount * 4).fill(0);
+        this.device.queue.writeBuffer(this.pixelCacheBuffer, 0, cacheData);
+        console.log('✅ [DEBUG] Cache zurückgesetzt');
+    }
+
+    // ===== STATUS-ANZEIGE AKTUALISIEREN =====
+    private updateStatus(message: string, className: string): void {
+        this.statusElement.textContent = message;                    // Text setzen
+        this.statusElement.className = `status ${className}`;        // CSS-Klasse setzen
+        console.log(`📱 [STATUS] ${message}`);
+    }
+}
+
+// ===== APP STARTEN =====
+console.log('🚀 Starte WebGPU Raytracer mit Cache-System...');
+new StorageBufferWebGPURaytracer();

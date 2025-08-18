@@ -1,141 +1,149 @@
-// ===== WGSL COMPUTE SHADER =====
-// Dieser Shader läuft auf der GPU und berechnet für jeden Pixel die Farbe durch Raytracing
+// ===== ECHTER WGSL COMPUTE SHADER MIT UNSICHTBAREM CACHE =====
 
-// Struktur für Kamera-Daten (Position und Blickrichtung)
 struct Camera {
-    position: vec3<f32>,    // Wo die Kamera steht (x, y, z)
-    _pad1: f32,            // Padding für GPU-Alignment (wichtig für Performance)
-    lookAt: vec3<f32>,     // Wo die Kamera hinschaut (x, y, z)
-    _pad2: f32,            // Padding für GPU-Alignment
+    position: vec3<f32>,
+    _pad1: f32,
+    lookAt: vec3<f32>,
+    _pad2: f32,
 }
 
-// Struktur für eine Kugel (unser 3D-Objekt)
 struct Sphere {
-    center: vec3<f32>,     // Mittelpunkt der Kugel (x, y, z)
-    radius: f32,           // Radius der Kugel
+    center: vec3<f32>,
+    radius: f32,
 }
 
-// Struktur für Bildschirm-Informationen
 struct RenderInfo {
-    width: u32,            // Bildschirm-Breite in Pixeln
-    height: u32,           // Bildschirm-Höhe in Pixeln
-    _pad1: u32,            // Padding
-    _pad2: u32,            // Padding
+    width: u32,
+    height: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
-// GPU-Resourcen die der Shader bekommt (Binding Points)
-@group(0) @binding(0) var<uniform> camera: Camera;              // Kamera-Daten
-@group(0) @binding(1) var<uniform> sphere: Sphere;             // Kugel-Daten
-@group(0) @binding(2) var<uniform> renderInfo: RenderInfo;     // Bildschirm-Info
-@group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>; // Output-Bild
+@group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<uniform> sphere: Sphere;
+@group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
+@group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(4) var<storage, read_write> pixelCache: array<u32>;
 
-// FUNKTION: Berechnet die Richtung eines Strahls von der Kamera durch einen Pixel
+// ===== ECHTER FARB-CACHE (4 uint pro Pixel) =====
+// Layout: [R, G, B, Valid] - jeder Wert 0-255 als uint
+
+fn getCacheIndex(coords: vec2<i32>) -> u32 {
+    return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
+}
+
+fn isCacheValid(coords: vec2<i32>) -> bool {
+    let baseIndex = getCacheIndex(coords);
+    return pixelCache[baseIndex + 3u] == 1u; // Valid-Flag an Position 3
+}
+
+fn setCachedColor(coords: vec2<i32>, color: vec4<f32>) {
+    let baseIndex = getCacheIndex(coords);
+    // Farbe als uint speichern (0-255 range)
+    pixelCache[baseIndex + 0u] = u32(clamp(color.r * 255.0, 0.0, 255.0));
+    pixelCache[baseIndex + 1u] = u32(clamp(color.g * 255.0, 0.0, 255.0));
+    pixelCache[baseIndex + 2u] = u32(clamp(color.b * 255.0, 0.0, 255.0));
+    pixelCache[baseIndex + 3u] = 1u; // Valid-Flag setzen
+}
+
+fn getCachedColor(coords: vec2<i32>) -> vec4<f32> {
+    let baseIndex = getCacheIndex(coords);
+    let r = f32(pixelCache[baseIndex + 0u]) / 255.0;
+    let g = f32(pixelCache[baseIndex + 1u]) / 255.0;
+    let b = f32(pixelCache[baseIndex + 2u]) / 255.0;
+    return vec4<f32>(r, g, b, 1.0);
+}
+
 fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
-    // Bildschirm-Verhältnis berechnen (Breite/Höhe)
     let aspectRatio = f32(renderInfo.width) / f32(renderInfo.height);
-    let fov = 1.0472; // Sichtfeld in Radians (60 Grad)
+    let fov = 1.0472;
     
-    // Kamera-Koordinatensystem berechnen
-    let forward = normalize(camera.lookAt - camera.position);  // Blickrichtung
-    let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), forward)); // Rechts-Vektor
-    let up = cross(forward, right);                            // Oben-Vektor
+    let forward = normalize(camera.lookAt - camera.position);
+    let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), forward));
+    let up = cross(forward, right);
     
-    // Virtueller Bildschirm vor der Kamera berechnen
-    let halfHeight = tan(fov * 0.5);           // Halbe Höhe des virtuellen Bildschirms
-    let halfWidth = halfHeight * aspectRatio;   // Halbe Breite des virtuellen Bildschirms
+    let halfHeight = tan(fov * 0.5);
+    let halfWidth = halfHeight * aspectRatio;
     
-    // UV-Koordinaten (0-1) zu Weltkoordinaten konvertieren
-    let x = (uv.x * 2.0 - 1.0) * halfWidth;   // -halfWidth bis +halfWidth
-    let y = -(uv.y * 2.0 - 1.0) * halfHeight; // -halfHeight bis +halfHeight (Y invertiert)
+    let x = (uv.x * 2.0 - 1.0) * halfWidth;
+    let y = -(uv.y * 2.0 - 1.0) * halfHeight;
     
-    // Strahl-Richtung berechnen und normalisieren
     return normalize(forward + x * right + y * up);
 }
 
-// FUNKTION: Testet ob ein Strahl eine Kugel trifft und gibt die Entfernung zurück
 fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> f32 {
-    // Quadratische Gleichung für Strahl-Kugel-Intersection
-    let oc = rayOrigin - sphere.center;        // Vektor von Kugel-Mitte zum Strahl-Start
-    let a = dot(rayDirection, rayDirection);   // Immer 1.0 bei normalisierten Vektoren
-    let b = 2.0 * dot(oc, rayDirection);      // Lineare Komponente
-    let c = dot(oc, oc) - sphere.radius * sphere.radius; // Konstante Komponente
+    let oc = rayOrigin - sphere.center;
+    let a = dot(rayDirection, rayDirection);
+    let b = 2.0 * dot(oc, rayDirection);
+    let c = dot(oc, oc) - sphere.radius * sphere.radius;
     
-    // Diskriminante berechnen (bestimmt ob es Schnittpunkte gibt)
     let discriminant = b * b - 4.0 * a * c;
     
-    // Keine Intersection wenn Diskriminante negativ
     if (discriminant < 0.0) {
-        return -1.0;  // Konvention: -1 bedeutet "kein Treffer"
+        return -1.0;
     }
     
-    // Zwei mögliche Schnittpunkte berechnen
     let sqrtDiscriminant = sqrt(discriminant);
-    let t1 = (-b - sqrtDiscriminant) / (2.0 * a);  // Näherer Schnittpunkt
-    let t2 = (-b + sqrtDiscriminant) / (2.0 * a);  // Fernerer Schnittpunkt
+    let t1 = (-b - sqrtDiscriminant) / (2.0 * a);
+    let t2 = (-b + sqrtDiscriminant) / (2.0 * a);
     
-    // Den nähesten positiven Schnittpunkt zurückgeben
     if (t1 > 0.0) {
         return t1;
     } else if (t2 > 0.0) {
         return t2;
     }
     
-    return -1.0;  // Kugel ist hinter der Kamera
+    return -1.0;
 }
 
-// FUNKTION: Berechnet die Beleuchtung an einem Punkt auf der Kugel
 fn calculateLighting(hitPoint: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
-    // Lichtquelle positionieren
     let lightPos = vec3<f32>(5.0, 5.0, 5.0);
-    let lightDir = normalize(lightPos - hitPoint);  // Richtung zum Licht
+    let lightDir = normalize(lightPos - hitPoint);
     
-    // Diffuse Beleuchtung berechnen (Lambert'sches Gesetz)
-    let diffuse = max(dot(normal, lightDir), 0.0);  // Cos-Winkel zwischen Normal und Licht
-    let ambient = 0.2;                              // Grundhelligkeit
-    let lighting = ambient + diffuse * 0.8;          // Kombination aus ambient + diffuse
+    let diffuse = max(dot(normal, lightDir), 0.0);
+    let ambient = 0.2;
+    let lighting = ambient + diffuse * 0.8;
     
-    // Blaue Farbe mit Beleuchtung multiplizieren
     return vec3<f32>(0.0, 0.0, 1.0) * lighting;
 }
 
-// HAUPTFUNKTION: Wird für jeden Pixel parallel ausgeführt
-@compute @workgroup_size(8, 8, 1)  // 8x8 Pixel werden gleichzeitig bearbeitet
+fn performRaytracing(uv: vec2<f32>) -> vec4<f32> {
+    let rayDirection = getCameraRay(uv);
+    let t = intersectSphere(camera.position, rayDirection);
+    
+    if (t > 0.0) {
+        let hitPoint = camera.position + rayDirection * t;
+        let normal = normalize(hitPoint - sphere.center);
+        let rgb = calculateLighting(hitPoint, normal);
+        return vec4<f32>(rgb, 1.0);
+    } else {
+        return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    }
+}
+
+@compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
-    // Aktuelle Pixel-Koordinaten ermitteln
     let pixelCoords = vec2<i32>(globalId.xy);
     let dimensions = vec2<i32>(i32(renderInfo.width), i32(renderInfo.height));
     
-    // Überprüfen ob Pixel innerhalb des Bildschirms liegt
     if (pixelCoords.x >= dimensions.x || pixelCoords.y >= dimensions.y) {
-        return;  // Pixel außerhalb - nichts tun
+        return;
     }
     
-    // Pixel-Koordinaten zu UV-Koordinaten (0.0 bis 1.0) konvertieren
     let uv = vec2<f32>(
-        f32(pixelCoords.x) / f32(dimensions.x),  // X: 0.0 bis 1.0
-        f32(pixelCoords.y) / f32(dimensions.y)   // Y: 0.0 bis 1.0
+        f32(pixelCoords.x) / f32(dimensions.x),
+        f32(pixelCoords.y) / f32(dimensions.y)
     );
     
-    // RAYTRACING-ALGORITHMUS:
-    // 1. Strahl von Kamera durch Pixel berechnen
-    let rayDirection = getCameraRay(uv);
-    
-    // 2. Testen ob Strahl die Kugel trifft
-    let t = intersectSphere(camera.position, rayDirection);
-    
-    // 3. Farbe des Pixels bestimmen
-    var color: vec4<f32>;
-    if (t > 0.0) {
-        // TREFFER: Kugel wurde getroffen
-        let hitPoint = camera.position + rayDirection * t;  // Trefferpunkt berechnen
-        let normal = normalize(hitPoint - sphere.center);   // Normale an der Oberfläche
-        let rgb = calculateLighting(hitPoint, normal);      // Beleuchtung berechnen
-        color = vec4<f32>(rgb, 1.0);                       // RGB + Alpha = 1.0
+    // ===== CACHE =====
+    if (isCacheValid(pixelCoords)) {
+        // CACHE HIT: Gespeicherte Farbe aus Cache laden
+        let cachedColor = getCachedColor(pixelCoords);
+        textureStore(outputTexture, pixelCoords, cachedColor);
     } else {
-        // KEIN TREFFER: Hintergrund anzeigen
-        color = vec4<f32>(1.0, 1.0, 1.0, 1.0);  // Weißer Hintergrund
+        // CACHE MISS: Raytracing durchführen und Ergebnis cachen
+        let color = performRaytracing(uv);
+        setCachedColor(pixelCoords, color); // Im Cache speichern
+        textureStore(outputTexture, pixelCoords, color);
     }
-    
-    // 4. Berechnete Farbe in Output-Texture schreiben
-    textureStore(outputTexture, pixelCoords, color);
 }
