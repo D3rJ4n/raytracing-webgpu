@@ -35,6 +35,7 @@ export class ComputePipeline {
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
             accumulation: GPUBuffer;
+            sceneConfig: GPUBuffer;
         },
         outputTexture: GPUTexture
     ): Promise<void> {
@@ -145,6 +146,12 @@ export class ComputePipeline {
                     binding: BINDING_CONFIG.COMPUTE.ACCUMULATION_BUFFER,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: 'storage' }
+                },
+                // Binding 6: Scene Config
+                {
+                    binding: BINDING_CONFIG.COMPUTE.SCENE_CONFIG,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'uniform' }
                 }
             ]
         });
@@ -186,6 +193,7 @@ export class ComputePipeline {
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
             accumulation: GPUBuffer;
+            sceneConfig: GPUBuffer;
         },
         outputTexture: GPUTexture
     ): void {
@@ -221,7 +229,11 @@ export class ComputePipeline {
                 },
                 {
                     binding: BINDING_CONFIG.COMPUTE.ACCUMULATION_BUFFER,
-                    resource: { buffer: buffers.accumulation } // NEU
+                    resource: { buffer: buffers.accumulation }
+                },
+                {
+                    binding: BINDING_CONFIG.COMPUTE.SCENE_CONFIG,
+                    resource: { buffer: buffers.sceneConfig }
                 }
             ]
         });
@@ -239,6 +251,7 @@ export class ComputePipeline {
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
             accumulation: GPUBuffer;
+            sceneConfig: GPUBuffer;
         },
         outputTexture: GPUTexture
     ): void {
@@ -268,7 +281,7 @@ export class ComputePipeline {
                 y: SHADER_CONFIG.WORKGROUP_SIZE.Y,
                 z: SHADER_CONFIG.WORKGROUP_SIZE.Z
             },
-            bindingCount: 5 // Camera, Sphere, RenderInfo, OutputTexture, Cache
+            bindingCount: 7
         };
     }
 

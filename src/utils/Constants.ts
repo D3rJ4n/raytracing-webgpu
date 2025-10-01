@@ -61,6 +61,10 @@ export const BUFFER_CONFIG = {
         SIZE: 16, // 4 uints × 4 bytes
         LABEL: 'Render Info Buffer',
     },
+    SCENE_CONFIG: {
+        SIZE: 32,  // Ground Y (4), Light Pos (12), Shadow Enable (4), padding (12)
+        LABEL: 'Scene Config Buffer',
+    },
     CACHE: {
         COMPONENTS_PER_PIXEL: 4, // [R, G, B, Valid]
         BYTES_PER_COMPONENT: 4, // uint32
@@ -115,10 +119,18 @@ export const SCENE_CONFIG = {
         COLOR: 0x0000ff, // Blau
         POSITION: { x: 0, y: 0, z: 0 },
     },
+    GROUND: {
+        Y_POSITION: -1.0,  // Ebene bei y = -1 (unter der Kugel)
+        COLOR: { r: 0.8, g: 0.8, b: 0.8 },  // Hellgrau
+        CHECKERBOARD: true,  // Schachbrett-Muster
+        CHECKER_SIZE: 1.0,   // Größe der Schachbrett-Quadrate
+    },
     LIGHTING: {
         POSITION: { x: 5.0, y: 5.0, z: 5.0 },
         AMBIENT: 0.2,
         DIFFUSE: 0.8,
+        SHADOW_ENABLED: true,
+        SHADOW_SOFTNESS: 0.0,
     },
 } as const;
 
@@ -152,6 +164,7 @@ export const BINDING_CONFIG = {
         OUTPUT_TEXTURE: 3,
         CACHE_BUFFER: 4,
         ACCUMULATION_BUFFER: 5,
+        SCENE_CONFIG: 6,
     },
     RENDER: {
         INPUT_TEXTURE: 0,
