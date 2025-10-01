@@ -1,4 +1,4 @@
-import { BUFFER_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG } from "../utils/Constants";
+import { BUFFER_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, getSphereCount, SCENE_CONFIG } from "../utils/Constants";
 import { Logger } from "../utils/Logger";
 
 export class BufferManager {
@@ -7,14 +7,14 @@ export class BufferManager {
 
     // ===== GPU BUFFERS =====
     private cameraBuffer: GPUBuffer | null = null;
-    private sphereBuffer: GPUBuffer | null = null;
+    private spheresBuffer: GPUBuffer | null = null;
     private renderInfoBuffer: GPUBuffer | null = null;
     private cacheBuffer: GPUBuffer | null = null;
     private accumulationBuffer: GPUBuffer | null = null; // NEU
     private sceneConfigBuffer: GPUBuffer | null = null;
     // ===== BUFFER-DATEN CACHE =====
     private cameraData: Float32Array | null = null;
-    private sphereData: Float32Array | null = null;
+    private spheresData: Float32Array | null = null;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -32,12 +32,12 @@ export class BufferManager {
     ): void {
         this.device = device;
         this.cameraData = cameraData;
-        this.sphereData = sphereData;
+        this.spheresData = sphereData;
 
         this.logger.buffer('Erstelle GPU-Buffers...');
 
         this.createCameraBuffer();
-        this.createSphereBuffer();
+        this.createSpheresBuffer();
         this.createRenderInfoBuffer(canvasWidth, canvasHeight);
         this.createCacheBuffer(canvasWidth, canvasHeight);
         this.createAccumulationBuffer(canvasWidth, canvasHeight);
@@ -46,6 +46,18 @@ export class BufferManager {
         this.logger.success('Alle GPU-Buffers erfolgreich erstellt');
     }
 
+    /**
+    * 🔄 Spheres-Daten aktualisieren (NEU)
+     */
+    public updateSpheresData(newSpheresData: Float32Array): void {
+        if (!this.device || !this.spheresBuffer) {
+            throw new Error('Device oder Spheres-Buffer nicht verfügbar');
+        }
+
+        this.spheresData = newSpheresData;
+        this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(this.spheresData));
+        this.logger.buffer('Spheres-Daten aktualisiert');
+    }
     /**
      * 📷 Kamera-Buffer erstellen
      */
@@ -78,24 +90,24 @@ export class BufferManager {
     /**
      * 🎱 Kugel-Buffer erstellen
      */
-    private createSphereBuffer(): void {
-        if (!this.device || !this.sphereData) {
+    private createSpheresBuffer(): void {
+        if (!this.device || !this.spheresData) {
             throw new Error('Device oder Kugel-Daten nicht verfügbar');
         }
 
-        this.logger.buffer('Erstelle Kugel-Buffer...');
+        this.logger.buffer('Erstelle Spheres-Buffer...');
 
-        this.sphereBuffer = this.device.createBuffer({
+        this.spheresBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.SPHERE.LABEL,
-            size: BUFFER_CONFIG.SPHERE.SIZE,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            size: BUFFER_CONFIG.SPHERES.SIZE,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
 
-        this.device.queue.writeBuffer(this.sphereBuffer, 0, new Float32Array(this.sphereData));
+        this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(this.spheresData));
 
-        this.logger.success(`Kugel-Buffer erstellt: ${BUFFER_CONFIG.SPHERE.SIZE} bytes`);
+        this.logger.success(`Spheres-Buffer erstellt: ${BUFFER_CONFIG.SPHERES.SIZE} bytes für ${getSphereCount()} Kugeln`);
+        this.logger.buffer('Sphere-Count:', getSphereCount());
     }
-
     /**
      * 📋 Render-Info-Buffer erstellen
      */
@@ -161,7 +173,7 @@ export class BufferManager {
 
         this.sceneConfigBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.SCENE_CONFIG.LABEL,
-            size: BUFFER_CONFIG.SCENE_CONFIG.SIZE,
+            size: 48,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
@@ -174,7 +186,12 @@ export class BufferManager {
             SCENE_CONFIG.LIGHTING.POSITION.x,    // Light Position X
             SCENE_CONFIG.LIGHTING.POSITION.y,    // Light Position Y
             SCENE_CONFIG.LIGHTING.POSITION.z,    // Light Position Z
-            SCENE_CONFIG.LIGHTING.SHADOW_ENABLED ? 1.0 : 0.0  // Shadow Enable Flag
+            SCENE_CONFIG.LIGHTING.SHADOW_ENABLED ? 1.0 : 0.0, // Shadow Enable Flag
+
+            SCENE_CONFIG.REFLECTIONS.ENABLED ? 1.0 : 0.0,      // [8] NEU
+            SCENE_CONFIG.REFLECTIONS.MAX_BOUNCES,              // [9] NEU
+            SCENE_CONFIG.REFLECTIONS.MIN_CONTRIBUTION,         // [10] NEU
+            0,
         ]);
 
         this.device.queue.writeBuffer(this.sceneConfigBuffer, 0, sceneConfigData);
@@ -276,12 +293,12 @@ export class BufferManager {
      * 🔄 Kugel-Daten aktualisieren
      */
     public updateSphereData(newSphereData: Float32Array): void {
-        if (!this.device || !this.sphereBuffer) {
+        if (!this.device || !this.spheresBuffer) {
             throw new Error('Device oder Kugel-Buffer nicht verfügbar');
         }
 
-        this.sphereData = newSphereData;
-        this.device.queue.writeBuffer(this.sphereBuffer, 0, new Float32Array(this.sphereData));
+        this.spheresData = newSphereData;
+        this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(this.spheresData));
         this.logger.buffer('Kugel-Daten aktualisiert');
     }
 
@@ -320,25 +337,35 @@ export class BufferManager {
      */
     public getAllBuffers(): {
         camera: GPUBuffer;
-        sphere: GPUBuffer;
+        spheres: GPUBuffer;
         renderInfo: GPUBuffer;
         cache: GPUBuffer;
         accumulation: GPUBuffer;
         sceneConfig: GPUBuffer;
     } {
-        if (!this.cameraBuffer || !this.sphereBuffer || !this.renderInfoBuffer ||
+        if (!this.cameraBuffer || !this.spheresBuffer || !this.renderInfoBuffer ||
             !this.cacheBuffer || !this.accumulationBuffer || !this.sceneConfigBuffer) {
             throw new Error('Nicht alle Buffers sind initialisiert');
         }
 
         return {
             camera: this.cameraBuffer,
-            sphere: this.sphereBuffer,
+            spheres: this.spheresBuffer,
             renderInfo: this.renderInfoBuffer,
             cache: this.cacheBuffer,
             accumulation: this.accumulationBuffer,
             sceneConfig: this.sceneConfigBuffer,
         };
+    }
+
+    /**
+     * 🎱 Spheres-Buffer abrufen (NEU)
+     */
+    public getSpheresBuffer(): GPUBuffer {
+        if (!this.spheresBuffer) {
+            throw new Error('Spheres-Buffer nicht initialisiert');
+        }
+        return this.spheresBuffer;
     }
 
     /**
@@ -375,10 +402,10 @@ export class BufferManager {
      * 🎱 Kugel-Buffer abrufen
      */
     public getSphereBuffer(): GPUBuffer {
-        if (!this.sphereBuffer) {
+        if (!this.spheresBuffer) {
             throw new Error('Kugel-Buffer nicht initialisiert');
         }
-        return this.sphereBuffer;
+        return this.spheresBuffer;
     }
 
     /**
@@ -396,7 +423,7 @@ export class BufferManager {
      */
     public isInitialized(): boolean {
         return this.cameraBuffer !== null &&
-            this.sphereBuffer !== null &&
+            this.spheresBuffer !== null &&
             this.renderInfoBuffer !== null &&
             this.cacheBuffer !== null &&
             this.accumulationBuffer !== null; // NEU
@@ -411,9 +438,9 @@ export class BufferManager {
             this.cameraBuffer = null;
         }
 
-        if (this.sphereBuffer) {
-            this.sphereBuffer.destroy();
-            this.sphereBuffer = null;
+        if (this.spheresBuffer) {
+            this.spheresBuffer.destroy();
+            this.spheresBuffer = null;
         }
 
         if (this.renderInfoBuffer) {

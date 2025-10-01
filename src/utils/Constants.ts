@@ -57,6 +57,14 @@ export const BUFFER_CONFIG = {
         SIZE: 16, // 4 floats × 4 bytes
         LABEL: 'Sphere Buffer',
     },
+    SPHERES: {
+        MAX_COUNT: 10,
+        BYTES_PER_SPHERE: 48,
+        get SIZE() {
+            return this.MAX_COUNT * this.BYTES_PER_SPHERE;
+        },
+        LABEL: 'Spheres Buffer',
+    },
     RENDER_INFO: {
         SIZE: 16, // 4 uints × 4 bytes
         LABEL: 'Render Info Buffer',
@@ -113,12 +121,38 @@ export const SCENE_CONFIG = {
         POSITION: { x: 0, y: 0, z: 5 },
         LOOK_AT: { x: 0, y: 0, z: 0 },
     },
+    //Singel Sphere
     SPHERE: {
         RADIUS: 1,
         SEGMENTS: 32,
         COLOR: 0x0000ff, // Blau
         POSITION: { x: 0, y: 0, z: 0 },
     },
+    //Mehrere Spheres
+    SPHERES: [
+        {
+            center: { x: 0, y: 0, z: 0 },
+            radius: 1.0,
+            color: { r: 0.2, g: 0.5, b: 1.0 },  // Blau - NICHT transparent
+            metallic: 0.7,   // Nicht 1.0!
+            roughness: 0.05,  // Blau
+        },
+        {
+            center: { x: -2.5, y: 0, z: -1 },
+            radius: 0.7,
+            color: { r: 1.0, g: 0.0, b: 0.0 },  // Rot
+        },
+        {
+            center: { x: 2.5, y: 0, z: -1 },
+            radius: 0.7,
+            color: { r: 0.0, g: 1.0, b: 0.0 },  // Grün
+        },
+        {
+            center: { x: 0, y: -0.3, z: 2 },
+            radius: 0.5,
+            color: { r: 1.0, g: 1.0, b: 0.0 },  // Gelb
+        },
+    ],
     GROUND: {
         Y_POSITION: -1.0,  // Ebene bei y = -1 (unter der Kugel)
         COLOR: { r: 0.8, g: 0.8, b: 0.8 },  // Hellgrau
@@ -131,6 +165,11 @@ export const SCENE_CONFIG = {
         DIFFUSE: 0.8,
         SHADOW_ENABLED: true,
         SHADOW_SOFTNESS: 0.0,
+    },
+    REFLECTIONS: {
+        ENABLED: true,
+        MAX_BOUNCES: 3,
+        MIN_CONTRIBUTION: 0.01,
     },
 } as const;
 
@@ -196,4 +235,38 @@ export function calculateWorkgroups(width: number, height: number): { x: number;
 export function calculateAccumulationBufferSize(width: number, height: number): number {
     const pixelCount = width * height;
     return pixelCount * BUFFER_CONFIG.ACCUMULATION.BYTES_PER_PIXEL;
+}
+
+// Helper-Funktion für Sphere-Count
+export function getSphereCount(): number {
+    return SCENE_CONFIG.SPHERES.length;
+}
+
+// Helper-Funktion für Spheres-Daten
+export function getSpheresData(): Float32Array {
+    const maxSpheres = BUFFER_CONFIG.SPHERES.MAX_COUNT;
+    const floatsPerSphere = 8; // center(3) + radius(1) + color(3) + padding(1)
+    const data = new Float32Array(maxSpheres * floatsPerSphere);
+
+    SCENE_CONFIG.SPHERES.forEach((sphere, index) => {
+        const offset = index * floatsPerSphere;
+
+        // Center (xyz)
+        data[offset + 0] = sphere.center.x;
+        data[offset + 1] = sphere.center.y;
+        data[offset + 2] = sphere.center.z;
+
+        // Radius
+        data[offset + 3] = sphere.radius;
+
+        // Color (rgb)
+        data[offset + 4] = sphere.color.r;
+        data[offset + 5] = sphere.color.g;
+        data[offset + 6] = sphere.color.b;
+
+        // Padding
+        data[offset + 7] = 0;
+    });
+
+    return data;
 }

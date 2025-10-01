@@ -1,4 +1,4 @@
-// ===== WGSL COMPUTE SHADER MIT GROUND PLANE & SCHATTEN =====
+// ===== WGSL COMPUTE SHADER =====
 
 // ===== STRUKTUREN =====
 
@@ -13,9 +13,11 @@ struct Camera {
     _pad3: u32,
 }
 
-struct Sphere {
+struct SphereData {
     center: vec3<f32>,
     radius: f32,
+    color: vec3<f32>,
+    _pad: f32,
 }
 
 struct RenderInfo {
@@ -26,31 +28,37 @@ struct RenderInfo {
 }
 
 struct SceneConfig {
-    groundY: f32,        // Y-Position der Ground Plane
+    groundY: f32,
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
-    lightPos: vec3<f32>, // Lichtquellen-Position
-    shadowEnabled: f32,  // 1.0 = an, 0.0 = aus
+    lightPos: vec3<f32>,
+    shadowEnabled: f32,
 }
 
 struct HitRecord {
-    hit: bool,           // Wurde etwas getroffen?
-    t: f32,              // Distanz zum Treffer
-    point: vec3<f32>,    // Treffer-Punkt
-    normal: vec3<f32>,   // Normale am Treffer-Punkt
-    material: u32,       // 0 = Kugel, 1 = Ground
+    hit: bool,
+    t: f32,
+    point: vec3<f32>,
+    normal: vec3<f32>,
+    material: u32,    // 0-9 = Sphere index, 100 = Ground
+    color: vec3<f32>, // Material-Farbe
 }
 
 // ===== BINDINGS =====
 
 @group(0) @binding(0) var<uniform> camera: Camera;
-@group(0) @binding(1) var<uniform> sphere: Sphere;
+@group(0) @binding(1) var<storage, read> spheres: array<SphereData>; 
 @group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
 @group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(4) var<storage, read_write> pixelCache: array<u32>;
 @group(0) @binding(5) var<storage, read_write> accumulationBuffer: array<f32>;
 @group(0) @binding(6) var<uniform> sceneConfig: SceneConfig;
+
+// ===== KONSTANTEN =====
+
+const MAX_SPHERES: u32 = 10u;
+const SPHERE_COUNT: u32 = 4u;  // Anzahl tatsächlich verwendeter Kugeln
 
 // ===== RANDOM NUMBER GENERATOR =====
 
@@ -148,9 +156,10 @@ fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     return normalize(forward + x * right + y * up);
 }
 
-// ===== RAY-SPHERE INTERSECTION =====
+// ===== RAY-SPHERE INTERSECTION (mit Index) =====
 
-fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> f32 {
+fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereIndex: u32) -> f32 {
+    let sphere = spheres[sphereIndex];
     let oc = rayOrigin - sphere.center;
     let a = dot(rayDirection, rayDirection);
     let b = 2.0 * dot(oc, rayDirection);
@@ -175,22 +184,15 @@ fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> f32 {
     return -1.0;
 }
 
-// ===== RAY-PLANE INTERSECTION (NEU) =====
+// ===== RAY-PLANE INTERSECTION =====
 
 fn intersectPlane(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, planeY: f32) -> f32 {
-    // Plane: y = planeY (horizontal plane)
-    // Ray: p = origin + t * direction
-    // Intersection: origin.y + t * direction.y = planeY
-    // Solve for t: t = (planeY - origin.y) / direction.y
-    
-    // Vermeiden von Division durch Null
     if (abs(rayDirection.y) < 0.0001) {
-        return -1.0;  // Ray ist parallel zur Ebene
+        return -1.0;
     }
     
     let t = (planeY - rayOrigin.y) / rayDirection.y;
     
-    // Nur positive t-Werte (vor der Kamera)
     if (t > 0.0) {
         return t;
     }
@@ -198,21 +200,24 @@ fn intersectPlane(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, planeY: f32) ->
     return -1.0;
 }
 
-// ===== CLOSEST HIT (NEU) =====
+// ===== CLOSEST HIT - ALLE OBJEKTE TESTEN =====
 
 fn findClosestHit(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> HitRecord {
     var closest: HitRecord;
     closest.hit = false;
-    closest.t = 999999.0;  // Unendlich weit
+    closest.t = 999999.0;
     
-    // Test Sphere
-    let tSphere = intersectSphere(rayOrigin, rayDirection);
-    if (tSphere > 0.0 && tSphere < closest.t) {
-        closest.hit = true;
-        closest.t = tSphere;
-        closest.point = rayOrigin + rayDirection * tSphere;
-        closest.normal = normalize(closest.point - sphere.center);
-        closest.material = 0u;  // Kugel
+   // Test alle Spheres
+    for (var i = 0u; i < SPHERE_COUNT; i++) {
+        let t = intersectSphere(rayOrigin, rayDirection, i);
+        if (t > 0.0 && t < closest.t) {
+            closest.hit = true;
+            closest.t = t;
+            closest.point = rayOrigin + rayDirection * t;
+            closest.normal = normalize(closest.point - spheres[i].center);
+            closest.material = i;  // Sphere-Index
+            closest.color = spheres[i].color;  // Farbe aus Array
+        }
     }
     
     // Test Ground Plane
@@ -221,91 +226,50 @@ fn findClosestHit(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> HitRecord {
         closest.hit = true;
         closest.t = tPlane;
         closest.point = rayOrigin + rayDirection * tPlane;
-        closest.normal = vec3<f32>(0.0, 1.0, 0.0);  // Immer nach oben
-        closest.material = 1u;  // Ground
+        closest.normal = vec3<f32>(0.0, 1.0, 0.0);
+        closest.material = 100u;  // Ground (spezieller Wert)
+        
+        // Ground: Einfarbig grau (kein Schachbrett)
+        closest.color = vec3<f32>(0.6, 0.6, 0.6);
     }
     
     return closest;
 }
 
-// ===== SHADOW CHECK (NEU) =====
+// ===== SHADOW CHECK - ALLE KUGELN TESTEN =====
 
 fn isInShadow(point: vec3<f32>, lightPos: vec3<f32>) -> bool {
-    // Ray von Treffer-Punkt zur Lichtquelle
     let lightDir = normalize(lightPos - point);
     let lightDist = length(lightPos - point);
-    
-    // Leicht vom Treffer-Punkt wegbewegen (vermeidet Self-Intersection)
     let shadowRayOrigin = point + lightDir * 0.001;
     
-    // Test ob etwas zwischen Punkt und Licht ist
-    let tSphere = intersectSphere(shadowRayOrigin, lightDir);
-    
-    // Wenn Sphere getroffen wird UND näher als Licht ist → im Schatten
-    if (tSphere > 0.0 && tSphere < lightDist) {
-        return true;
+    // Test alle Spheres
+    for (var i = 0u; i < SPHERE_COUNT; i++) {
+        let t = intersectSphere(shadowRayOrigin, lightDir, i);
+        if (t > 0.0 && t < lightDist) {
+            return true;  // Im Schatten
+        }
     }
     
     return false;
 }
 
-// ===== MATERIAL FARBE =====
-
-fn getMaterialColor(hitRecord: HitRecord) -> vec3<f32> {
-    if (hitRecord.material == 0u) {
-        // Kugel: Blau
-        return vec3<f32>(0.0, 0.0, 1.0);
-    } else {
-        // Ground: Schachbrett-Muster
-        let gridSize = 1.0;  // Größe der Schachbrett-Quadrate
-        let x = floor(hitRecord.point.x / gridSize);
-        let z = floor(hitRecord.point.z / gridSize);
-        let checker = (i32(x) + i32(z)) % 2;
-        
-        if (checker == 0) {
-            return vec3<f32>(0.8, 0.8, 0.8);  // Hellgrau
-        } else {
-            return vec3<f32>(0.3, 0.3, 0.3);  // Dunkelgrau
-        }
-    }
-    //====== einfarbiger Boden =======
-    /*
-     if (hitRecord.material == 0u) {
-        // Kugel: Blau
-        return vec3<f32>(0.0, 0.0, 1.0);
-    } else {
-        // Ground: Einfarbig Grau
-        return vec3<f32>(0.6, 0.6, 0.6);
-    }
-    */
-}
-
-// ===== LIGHTING BERECHNUNG (ERWEITERT) =====
+// ===== LIGHTING BERECHNUNG =====
 
 fn calculateLighting(hitRecord: HitRecord) -> vec3<f32> {
     let lightDir = normalize(sceneConfig.lightPos - hitRecord.point);
-    
-    // Diffuse Komponente (Lambert)
     let diffuse = max(dot(hitRecord.normal, lightDir), 0.0);
-    
-    // Ambient
     let ambient = 0.2;
     
-    // Shadow Check
     var shadowFactor = 1.0;
     if (sceneConfig.shadowEnabled > 0.5 && diffuse > 0.0) {
         if (isInShadow(hitRecord.point, sceneConfig.lightPos)) {
-            shadowFactor = 0.3;  // 30% Helligkeit im Schatten
+            shadowFactor = 0.3;
         }
     }
     
-    // Gesamtbeleuchtung
     let lighting = ambient + diffuse * 0.8 * shadowFactor;
-    
-    // Material-Farbe
-    let albedo = getMaterialColor(hitRecord);
-    
-    return albedo * lighting;
+    return hitRecord.color * lighting;
 }
 
 // ===== RAYTRACING =====
@@ -349,23 +313,15 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         f32(pixelCoords.y) / f32(dimensions.y)
     );
     
-    // Jitter für Anti-Aliasing
     let jitter = randomFloat2(&seed);
     let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
     let uv = baseUV + (jitter - 0.5) * pixelSize;
     
-    // Raytracing durchführen
     let sampleColor = performRaytracing(uv);
     
-    // In Accumulation Buffer akkumulieren
     accumulateColor(pixelCoords, sampleColor);
-    
-    // Durchschnitt berechnen
     let averageColor = getAverageColor(pixelCoords);
-    
-    // Gamma-Korrektur
     let finalColor = linearToSrgb(averageColor);
     
-    // Zum Output schreiben
     textureStore(outputTexture, pixelCoords, vec4<f32>(finalColor, 1.0));
 }

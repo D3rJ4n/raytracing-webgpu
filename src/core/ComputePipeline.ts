@@ -31,7 +31,7 @@ export class ComputePipeline {
         device: GPUDevice,
         buffers: {
             camera: GPUBuffer;
-            sphere: GPUBuffer;
+            spheres: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
             accumulation: GPUBuffer;
@@ -117,7 +117,7 @@ export class ComputePipeline {
                 {
                     binding: BINDING_CONFIG.COMPUTE.SPHERE,
                     visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: 'uniform' }
+                    buffer: { type: 'read-only-storage' }
                 },
                 // Binding 2: Render-Info (uniform buffer)
                 {
@@ -189,7 +189,7 @@ export class ComputePipeline {
     private createBindGroup(
         buffers: {
             camera: GPUBuffer;
-            sphere: GPUBuffer;
+            spheres: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
             accumulation: GPUBuffer;
@@ -213,7 +213,7 @@ export class ComputePipeline {
                 },
                 {
                     binding: BINDING_CONFIG.COMPUTE.SPHERE,
-                    resource: { buffer: buffers.sphere }
+                    resource: { buffer: buffers.spheres }
                 },
                 {
                     binding: BINDING_CONFIG.COMPUTE.RENDER_INFO,
@@ -247,7 +247,7 @@ export class ComputePipeline {
     public updateBindGroup(
         buffers: {
             camera: GPUBuffer;
-            sphere: GPUBuffer;
+            spheres: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
             accumulation: GPUBuffer;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Logger } from '../utils/Logger';
-import { SCENE_CONFIG } from '../utils/Constants';
+import { getSphereCount, getSpheresData, SCENE_CONFIG } from '../utils/Constants';
 
 /**
  * 🌍 Scene - Three.js Szenen-Management
@@ -137,6 +137,19 @@ export class Scene {
         ]);
     }
 
+    /**
+     * 🎱 Mehrere Kugeln-Daten für GPU-Buffer abrufen
+     */
+    public getSpheresData(): Float32Array {
+        return getSpheresData();
+    }
+
+    /**
+     * 📊 Anzahl der Kugeln abrufen 
+     */
+    public getSphereCount(): number {
+        return getSphereCount();
+    }
     /**
      * 📏 Render-Info-Daten für GPU-Buffer abrufen
      */

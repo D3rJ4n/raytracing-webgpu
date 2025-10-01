@@ -101,7 +101,7 @@ export class WebGPURaytracerApp {
                 this.canvas.width,
                 this.canvas.height,
                 this.scene.getCameraData(),
-                this.scene.getSphereData()
+                this.scene.getSpheresData()
             );
 
             // 4. Cache-System initialisieren
