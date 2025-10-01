@@ -1,10 +1,14 @@
-// ===== ECHTER WGSL COMPUTE SHADER MIT UNSICHTBAREM CACHE =====
+// ===== WGSL COMPUTE SHADER MIT SUPERSAMPLING =====
 
 struct Camera {
     position: vec3<f32>,
     _pad1: f32,
     lookAt: vec3<f32>,
     _pad2: f32,
+    randomSeed1: f32,  // NEU: für Jittering
+    randomSeed2: f32,  // NEU: für Jittering
+    sampleCount: u32,  // NEU: aktueller Sample
+    _pad3: u32,
 }
 
 struct Sphere {
@@ -24,26 +28,84 @@ struct RenderInfo {
 @group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
 @group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(4) var<storage, read_write> pixelCache: array<u32>;
+@group(0) @binding(5) var<storage, read_write> accumulationBuffer: array<f32>;
 
-// ===== ECHTER FARB-CACHE (4 uint pro Pixel) =====
-// Layout: [R, G, B, Valid] - jeder Wert 0-255 als uint
+// ===== RANDOM NUMBER GENERATOR =====
+fn pcgHash(input: u32) -> u32 {
+    var state = input * 747796405u + 2891336453u;
+    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
 
+fn randomFloat(seed: ptr<function, u32>) -> f32 {
+    *seed = pcgHash(*seed);
+    return f32(*seed) / 4294967296.0;
+}
+
+fn randomFloat2(seed: ptr<function, u32>) -> vec2<f32> {
+    return vec2<f32>(randomFloat(seed), randomFloat(seed));
+}
+
+// ===== ACCUMULATION BUFFER FUNKTIONEN =====
+fn getAccumulationIndex(coords: vec2<i32>) -> u32 {
+    return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
+}
+
+fn accumulateColor(coords: vec2<i32>, newColor: vec3<f32>) {
+    let baseIndex = getAccumulationIndex(coords);
+    
+    // Alte akkumulierte Farbe lesen
+    let oldR = accumulationBuffer[baseIndex + 0u];
+    let oldG = accumulationBuffer[baseIndex + 1u];
+    let oldB = accumulationBuffer[baseIndex + 2u];
+    let oldCount = accumulationBuffer[baseIndex + 3u];
+    
+    // Neue Farbe akkumulieren
+    let newCount = oldCount + 1.0;
+    accumulationBuffer[baseIndex + 0u] = oldR + newColor.r;
+    accumulationBuffer[baseIndex + 1u] = oldG + newColor.g;
+    accumulationBuffer[baseIndex + 2u] = oldB + newColor.b;
+    accumulationBuffer[baseIndex + 3u] = newCount;
+}
+
+fn getAverageColor(coords: vec2<i32>) -> vec3<f32> {
+    let baseIndex = getAccumulationIndex(coords);
+    
+    let totalR = accumulationBuffer[baseIndex + 0u];
+    let totalG = accumulationBuffer[baseIndex + 1u];
+    let totalB = accumulationBuffer[baseIndex + 2u];
+    let count = accumulationBuffer[baseIndex + 3u];
+    
+    if (count > 0.0) {
+        return vec3<f32>(totalR / count, totalG / count, totalB / count);
+    }
+    return vec3<f32>(0.0);
+}
+
+fn resetAccumulation(coords: vec2<i32>) {
+    let baseIndex = getAccumulationIndex(coords);
+    accumulationBuffer[baseIndex + 0u] = 0.0;
+    accumulationBuffer[baseIndex + 1u] = 0.0;
+    accumulationBuffer[baseIndex + 2u] = 0.0;
+    accumulationBuffer[baseIndex + 3u] = 0.0;
+}
+
+// ===== CACHE FUNKTIONEN (unverändert) =====
 fn getCacheIndex(coords: vec2<i32>) -> u32 {
     return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
 }
 
 fn isCacheValid(coords: vec2<i32>) -> bool {
     let baseIndex = getCacheIndex(coords);
-    return pixelCache[baseIndex + 3u] == 1u; // Valid-Flag an Position 3
+    return pixelCache[baseIndex + 3u] == 1u;
 }
 
 fn setCachedColor(coords: vec2<i32>, color: vec4<f32>) {
     let baseIndex = getCacheIndex(coords);
-    // Farbe als uint speichern (0-255 range)
     pixelCache[baseIndex + 0u] = u32(clamp(color.r * 255.0, 0.0, 255.0));
     pixelCache[baseIndex + 1u] = u32(clamp(color.g * 255.0, 0.0, 255.0));
     pixelCache[baseIndex + 2u] = u32(clamp(color.b * 255.0, 0.0, 255.0));
-    pixelCache[baseIndex + 3u] = 1u; // Valid-Flag setzen
+    pixelCache[baseIndex + 3u] = 1u;
 }
 
 fn getCachedColor(coords: vec2<i32>) -> vec4<f32> {
@@ -54,6 +116,7 @@ fn getCachedColor(coords: vec2<i32>) -> vec4<f32> {
     return vec4<f32>(r, g, b, 1.0);
 }
 
+// ===== RAYTRACING FUNKTIONEN =====
 fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     let aspectRatio = f32(renderInfo.width) / f32(renderInfo.height);
     let fov = 1.0472;
@@ -107,20 +170,25 @@ fn calculateLighting(hitPoint: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(0.0, 0.0, 1.0) * lighting;
 }
 
-fn performRaytracing(uv: vec2<f32>) -> vec4<f32> {
+fn performRaytracing(uv: vec2<f32>) -> vec3<f32> {
     let rayDirection = getCameraRay(uv);
     let t = intersectSphere(camera.position, rayDirection);
     
     if (t > 0.0) {
         let hitPoint = camera.position + rayDirection * t;
         let normal = normalize(hitPoint - sphere.center);
-        let rgb = calculateLighting(hitPoint, normal);
-        return vec4<f32>(rgb, 1.0);
+        return calculateLighting(hitPoint, normal);
     } else {
-        return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+        return vec3<f32>(1.0, 1.0, 1.0);
     }
 }
 
+// ===== GAMMA CORRECTION =====
+fn linearToSrgb(linear: vec3<f32>) -> vec3<f32> {
+    return pow(linear, vec3<f32>(1.0 / 2.2));
+}
+
+// ===== MAIN COMPUTE SHADER =====
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     let pixelCoords = vec2<i32>(globalId.xy);
@@ -130,20 +198,39 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         return;
     }
     
-    let uv = vec2<f32>(
+    // Random Seed für diesen Pixel
+    var seed = u32(pixelCoords.x) + u32(pixelCoords.y) * renderInfo.width;
+    seed += u32(camera.randomSeed1 * 1000000.0);
+    seed = pcgHash(seed);
+    
+    // Base UV-Koordinaten
+    let baseUV = vec2<f32>(
         f32(pixelCoords.x) / f32(dimensions.x),
         f32(pixelCoords.y) / f32(dimensions.y)
     );
     
-    // ===== CACHE =====
-    if (isCacheValid(pixelCoords)) {
-        // CACHE HIT: Gespeicherte Farbe aus Cache laden
-        let cachedColor = getCachedColor(pixelCoords);
-        textureStore(outputTexture, pixelCoords, cachedColor);
-    } else {
-        // CACHE MISS: Raytracing durchführen und Ergebnis cachen
-        let color = performRaytracing(uv);
-        setCachedColor(pixelCoords, color); // Im Cache speichern
-        textureStore(outputTexture, pixelCoords, color);
+    // Jitter für Anti-Aliasing (innerhalb des Pixels)
+    let jitter = randomFloat2(&seed);
+    let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
+    let uv = baseUV + (jitter - 0.5) * pixelSize;
+    
+    // Raytracing für diesen Sample durchführen
+    let sampleColor = performRaytracing(uv);
+    
+    // In Accumulation Buffer akkumulieren
+    accumulateColor(pixelCoords, sampleColor);
+    
+    // Durchschnitt berechnen
+    let averageColor = getAverageColor(pixelCoords);
+    
+    // Gamma-Korrektur anwenden
+    let finalColor = linearToSrgb(averageColor);
+    
+    // Zum Output schreiben
+    textureStore(outputTexture, pixelCoords, vec4<f32>(finalColor, 1.0));
+    
+    // Optional: Cache aktualisieren (für statische Szenen)
+    if (camera.sampleCount > 8u) {
+        setCachedColor(pixelCoords, vec4<f32>(finalColor, 1.0));
     }
 }

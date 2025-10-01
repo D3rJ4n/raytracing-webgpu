@@ -34,6 +34,7 @@ export class ComputePipeline {
             sphere: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
+            accumulation: GPUBuffer;
         },
         outputTexture: GPUTexture
     ): Promise<void> {
@@ -138,6 +139,12 @@ export class ComputePipeline {
                     binding: BINDING_CONFIG.COMPUTE.CACHE_BUFFER,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: 'storage' }
+                },
+                // Binding 5: Accumulation-Buffer (storage buffer) - NEU!
+                {
+                    binding: BINDING_CONFIG.COMPUTE.ACCUMULATION_BUFFER,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'storage' }
                 }
             ]
         });
@@ -178,6 +185,7 @@ export class ComputePipeline {
             sphere: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
+            accumulation: GPUBuffer;
         },
         outputTexture: GPUTexture
     ): void {
@@ -210,6 +218,10 @@ export class ComputePipeline {
                 {
                     binding: BINDING_CONFIG.COMPUTE.CACHE_BUFFER,
                     resource: { buffer: buffers.cache }
+                },
+                {
+                    binding: BINDING_CONFIG.COMPUTE.ACCUMULATION_BUFFER,
+                    resource: { buffer: buffers.accumulation } // NEU
                 }
             ]
         });
@@ -226,6 +238,7 @@ export class ComputePipeline {
             sphere: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
+            accumulation: GPUBuffer;
         },
         outputTexture: GPUTexture
     ): void {

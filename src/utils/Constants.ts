@@ -3,6 +3,13 @@
  * 
  * Alle Konstanten und Konfigurationswerte an einem Ort
  */
+// ===== SUPERSAMPLING KONFIGURATION =====
+export const SUPERSAMPLING_CONFIG = {
+    ENABLED: true,
+    SAMPLES_PER_PIXEL: 4, // 1, 4, 8, 16
+    PROGRESSIVE_MODE: true, // Über mehrere Frames akkumulieren
+    MAX_SAMPLES: 16, // Maximum für progressive Mode
+} as const;
 
 // ===== CANVAS & RENDERING =====
 export const CANVAS_CONFIG = {
@@ -43,7 +50,7 @@ export const SHADER_CONFIG = {
 // ===== BUFFER KONFIGURATION =====
 export const BUFFER_CONFIG = {
     CAMERA: {
-        SIZE: 32, // 8 floats × 4 bytes
+        SIZE: 48, // 12 floats × 4 bytes (für Random Seeds)
         LABEL: 'Camera Buffer',
     },
     SPHERE: {
@@ -60,6 +67,14 @@ export const BUFFER_CONFIG = {
         BYTES_PER_PIXEL: 16, // 4 × 4 bytes
         LABEL: 'Color Cache Buffer',
     },
+
+    ACCUMULATION: {
+        COMPONENTS_PER_PIXEL: 4, // [R, G, B, SampleCount]
+        BYTES_PER_COMPONENT: 4, // float32
+        BYTES_PER_PIXEL: 16, // 4 × 4 bytes
+        LABEL: 'Accumulation Buffer',
+    },
+
 } as const;
 
 // ===== TEXTURE KONFIGURATION =====
@@ -136,6 +151,7 @@ export const BINDING_CONFIG = {
         RENDER_INFO: 2,
         OUTPUT_TEXTURE: 3,
         CACHE_BUFFER: 4,
+        ACCUMULATION_BUFFER: 5,
     },
     RENDER: {
         INPUT_TEXTURE: 0,
@@ -162,4 +178,9 @@ export function calculateWorkgroups(width: number, height: number): { x: number;
         x: Math.ceil(width / SHADER_CONFIG.WORKGROUP_SIZE.X),
         y: Math.ceil(height / SHADER_CONFIG.WORKGROUP_SIZE.Y),
     };
+}
+
+export function calculateAccumulationBufferSize(width: number, height: number): number {
+    const pixelCount = width * height;
+    return pixelCount * BUFFER_CONFIG.ACCUMULATION.BYTES_PER_PIXEL;
 }

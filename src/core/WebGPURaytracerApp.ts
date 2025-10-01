@@ -31,6 +31,9 @@ export class WebGPURaytracerApp {
     private renderer: Renderer;
     private pixelCache: PixelCache;
     private cacheDebugger: CacheDebugger;
+    private currentSample: number = 0;
+    private maxSamples: number = 0;
+    private isAccumulating: boolean = false;
 
     // ===== UTILITIES =====
     private logger: Logger;
@@ -239,5 +242,181 @@ export class WebGPURaytracerApp {
 
         this.initialized = false;
         this.logger.info('✅ Cleanup abgeschlossen');
+    }
+
+    /**
+ * 🎨 Progressive Supersampling starten
+ */
+    public async startProgressiveSupersampling(maxSamples: number = 16): Promise<void> {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        this.logger.info(`🎨 Starte Progressive Supersampling: ${maxSamples} samples`);
+
+        // Accumulation zurücksetzen
+        this.bufferManager.resetAccumulation(this.canvas.width, this.canvas.height);
+        this.currentSample = 0;
+        this.maxSamples = maxSamples;
+        this.isAccumulating = true;
+
+        // Progressive Rendering
+        const startTime = performance.now();
+
+        for (let sample = 0; sample < maxSamples; sample++) {
+            this.currentSample = sample + 1;
+
+            // Kamera-Daten mit Random Seeds aktualisieren
+            const baseCameraData = this.scene.getCameraData();
+            this.bufferManager.updateCameraDataWithRandomSeeds(baseCameraData, sample);
+
+            // Frame rendern
+            await this.renderer.renderFrame(this.canvas);
+
+            // Progress anzeigen
+            if (sample % 4 === 0 || sample === maxSamples - 1) {
+                const progress = ((sample + 1) / maxSamples * 100).toFixed(0);
+                this.statusDisplay.showInfo(
+                    `🎨 Supersampling: ${sample + 1}/${maxSamples} (${progress}%)`
+                );
+            }
+
+            // Kurze Pause für UI-Updates (alle 4 Samples)
+            if (sample % 4 === 0 && sample < maxSamples - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1));
+            }
+        }
+
+        const totalTime = performance.now() - startTime;
+        const avgTimePerSample = totalTime / maxSamples;
+
+        this.isAccumulating = false;
+
+        this.logger.success(
+            `✅ Supersampling abgeschlossen: ${maxSamples} samples in ${totalTime.toFixed(0)}ms ` +
+            `(${avgTimePerSample.toFixed(1)}ms/sample)`
+        );
+
+        this.statusDisplay.showSuccess(
+            `✅ ${maxSamples}x Supersampling abgeschlossen (${totalTime.toFixed(0)}ms)`
+        );
+    }
+
+    /**
+     * 🔄 Accumulation zurücksetzen
+     */
+    public resetAccumulation(): void {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        this.bufferManager.resetAccumulation(this.canvas.width, this.canvas.height);
+        this.currentSample = 0;
+        this.isAccumulating = false;
+
+        this.logger.info('🔄 Accumulation zurückgesetzt');
+    }
+
+    /**
+     * 🎯 Single-Sample Frame rendern (ohne Accumulation)
+     */
+    public async renderSingleFrame(): Promise<void> {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        // Accumulation zurücksetzen für sauberen Single-Frame
+        this.resetAccumulation();
+
+        // Kamera-Daten ohne Random Seeds (oder mit fixen Seeds)
+        const baseCameraData = this.scene.getCameraData();
+        this.bufferManager.updateCameraDataWithRandomSeeds(baseCameraData, 0);
+
+        // Frame rendern
+        await this.renderer.renderFrame(this.canvas);
+    }
+
+    /**
+     * 📊 Supersampling-Status abrufen
+     */
+    public getSupersamplingStatus(): {
+        isAccumulating: boolean;
+        currentSample: number;
+        maxSamples: number;
+        progress: number;
+    } {
+        return {
+            isAccumulating: this.isAccumulating,
+            currentSample: this.currentSample,
+            maxSamples: this.maxSamples,
+            progress: this.maxSamples > 0 ? (this.currentSample / this.maxSamples) * 100 : 0
+        };
+    }
+
+    /**
+     * ⚡ Quick Supersampling (4 Samples)
+     */
+    public async quickSupersampling(): Promise<void> {
+        await this.startProgressiveSupersampling(4);
+    }
+
+    /**
+     * 🎨 High Quality Supersampling (16 Samples)
+     */
+    public async highQualitySupersampling(): Promise<void> {
+        await this.startProgressiveSupersampling(16);
+    }
+
+    /**
+     * 💎 Extreme Quality Supersampling (64 Samples)
+     */
+    public async extremeSupersampling(): Promise<void> {
+        await this.startProgressiveSupersampling(64);
+    }
+
+    /**
+     * 🔬 Supersampling-Vergleichstest
+     */
+    public async compareSupersampling(): Promise<{
+        noAA: number;
+        samples4: number;
+        samples16: number;
+    }> {
+        this.logger.info('🔬 Starte Supersampling-Vergleichstest...');
+
+        // Test 1: Ohne AA
+        this.resetAccumulation();
+        const time1 = performance.now();
+        await this.renderSingleFrame();
+        const noAATime = performance.now() - time1;
+        this.logger.info(`  Ohne AA: ${noAATime.toFixed(1)}ms`);
+
+        await new Promise(r => setTimeout(r, 500));
+
+        // Test 2: 4x AA
+        this.resetAccumulation();
+        const time2 = performance.now();
+        await this.startProgressiveSupersampling(4);
+        const aa4Time = performance.now() - time2;
+        this.logger.info(`  4x AA: ${aa4Time.toFixed(1)}ms`);
+
+        await new Promise(r => setTimeout(r, 500));
+
+        // Test 3: 16x AA
+        this.resetAccumulation();
+        const time3 = performance.now();
+        await this.startProgressiveSupersampling(16);
+        const aa16Time = performance.now() - time3;
+        this.logger.info(`  16x AA: ${aa16Time.toFixed(1)}ms`);
+
+        this.logger.info('📊 Vergleich abgeschlossen:');
+        this.logger.info(`  Overhead 4x:  ${(aa4Time / noAATime).toFixed(1)}x`);
+        this.logger.info(`  Overhead 16x: ${(aa16Time / noAATime).toFixed(1)}x`);
+
+        return {
+            noAA: noAATime,
+            samples4: aa4Time,
+            samples16: aa16Time
+        };
     }
 }

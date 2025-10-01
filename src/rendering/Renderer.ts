@@ -8,6 +8,7 @@ import { calculateWorkgroups } from '../utils/Constants';
  * - Compute Pass (Raytracing)
  * - Render Pass (Display)
  * - Command Encoding & Submission
+ * - Progressive Supersampling (NEU)
  */
 export class Renderer {
     private device: GPUDevice | null = null;
@@ -24,6 +25,11 @@ export class Renderer {
 
     // ===== FRAME COUNTER =====
     private frameCount: number = 0;
+
+    // ===== SUPERSAMPLING STATE (NEU) =====
+    private currentSample: number = 0;
+    private maxSamples: number = 0;
+    private isAccumulating: boolean = false;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -153,6 +159,106 @@ export class Renderer {
     }
 
     /**
+     * 🎨 Progressive Supersampling aktivieren (NEU)
+     */
+    public startProgressive(maxSamples: number = 16): void {
+        this.currentSample = 0;
+        this.maxSamples = maxSamples;
+        this.isAccumulating = true;
+        this.logger.info(`Progressive Supersampling gestartet (${maxSamples} samples)`);
+    }
+
+    /**
+     * ⏹️ Progressive Supersampling stoppen (NEU)
+     */
+    public stopProgressive(): void {
+        this.isAccumulating = false;
+        this.logger.info('Progressive Supersampling gestoppt');
+    }
+
+    /**
+     * 🔄 Accumulation zurücksetzen (NEU)
+     */
+    public resetAccumulation(): void {
+        this.currentSample = 0;
+        this.logger.info('Accumulation zurückgesetzt');
+    }
+
+    /**
+     * 📊 Progressive Rendering Status (NEU)
+     */
+    public getProgressiveStatus(): {
+        isAccumulating: boolean;
+        currentSample: number;
+        maxSamples: number;
+        progress: number;
+    } {
+        return {
+            isAccumulating: this.isAccumulating,
+            currentSample: this.currentSample,
+            maxSamples: this.maxSamples,
+            progress: this.maxSamples > 0 ? (this.currentSample / this.maxSamples) * 100 : 0
+        };
+    }
+
+    /**
+     * 🎬 Frame mit Progressive Supersampling rendern (NEU)
+     */
+    public async renderFrameProgressive(canvas: HTMLCanvasElement): Promise<number> {
+        if (!this.isInitialized()) {
+            throw new Error('Renderer nicht initialisiert');
+        }
+
+        const startTime = performance.now();
+        this.frameCount++;
+
+        // Normal rendern
+        const commandEncoder = this.device!.createCommandEncoder({
+            label: `Frame ${this.frameCount} Commands`
+        });
+
+        await this.executeComputePass(commandEncoder, canvas);
+        this.executeRenderPass(commandEncoder);
+
+        this.device!.queue.submit([commandEncoder.finish()]);
+
+        // Sample Counter erhöhen
+        if (this.isAccumulating && this.currentSample < this.maxSamples) {
+            this.currentSample++;
+
+            if (this.currentSample >= this.maxSamples) {
+                this.logger.success(`Supersampling abgeschlossen (${this.maxSamples} samples)`);
+            }
+        }
+
+        const renderTime = performance.now() - startTime;
+        return renderTime;
+    }
+
+    /**
+     * 🔄 Kontinuierliches Progressive Rendering (NEU)
+     */
+    public async startContinuousProgressive(
+        canvas: HTMLCanvasElement,
+        onProgress?: (sample: number, maxSamples: number) => void
+    ): Promise<void> {
+        this.startProgressive();
+
+        while (this.isAccumulating && this.currentSample < this.maxSamples) {
+            await this.renderFrameProgressive(canvas);
+
+            if (onProgress) {
+                onProgress(this.currentSample, this.maxSamples);
+            }
+
+            // Kurze Pause für UI-Updates
+            await new Promise(resolve => setTimeout(resolve, 16));
+        }
+
+        this.logger.success('Progressive Rendering abgeschlossen');
+    }
+
+    /**
      * 📊 Batch-Rendering (mehrere Frames)
      */
     public async renderBatch(
@@ -164,7 +270,7 @@ export class Renderer {
         averageFrameTime: number;
         framesTimes: number[];
     }> {
-        this.logger.info(`🎬 Starte Batch-Rendering: ${frameCount} Frames...`);
+        this.logger.info(`Starte Batch-Rendering: ${frameCount} Frames...`);
 
         const frameTimes: number[] = [];
         const startTime = performance.now();
@@ -182,7 +288,7 @@ export class Renderer {
         const totalTime = performance.now() - startTime;
         const averageFrameTime = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
 
-        this.logger.info(`📊 Batch-Rendering abgeschlossen:`);
+        this.logger.info(`Batch-Rendering abgeschlossen:`);
         this.logger.info(`  Frames: ${frameCount}`);
         this.logger.info(`  Gesamtzeit: ${totalTime.toFixed(2)}ms`);
         this.logger.info(`  Durchschnitt pro Frame: ${averageFrameTime.toFixed(2)}ms`);
@@ -223,12 +329,12 @@ export class Renderer {
             requestAnimationFrame(renderLoop);
         };
 
-        this.logger.info(`🔄 Starte Render-Loop (Target: ${targetFPS} FPS)...`);
+        this.logger.info(`Starte Render-Loop (Target: ${targetFPS} FPS)...`);
         renderLoop();
     }
 
     /**
-     * 📝 Rendering-Ressourcen loggen
+     * 🔍 Rendering-Ressourcen loggen
      */
     private logRenderingResources(): void {
         const resources = [
@@ -267,10 +373,16 @@ export class Renderer {
     public getStatistics(): {
         frameCount: number;
         isInitialized: boolean;
+        supersamplingActive: boolean;
+        currentSample: number;
+        maxSamples: number;
     } {
         return {
             frameCount: this.frameCount,
-            isInitialized: this.isInitialized()
+            isInitialized: this.isInitialized(),
+            supersamplingActive: this.isAccumulating,
+            currentSample: this.currentSample,
+            maxSamples: this.maxSamples
         };
     }
 
@@ -299,6 +411,9 @@ export class Renderer {
         this.renderBindGroup = null;
 
         this.frameCount = 0;
+        this.currentSample = 0;
+        this.maxSamples = 0;
+        this.isAccumulating = false;
 
         this.logger.info('Renderer aufgeräumt');
     }
