@@ -131,26 +131,34 @@ export const SCENE_CONFIG = {
     //Mehrere Spheres
     SPHERES: [
         {
-            center: { x: 0, y: 0, z: 0 },
+            center: { x: 0, y: 1, z: 0 },
             radius: 1.0,
-            color: { r: 0.2, g: 0.5, b: 1.0 },  // Blau - NICHT transparent
-            metallic: 0.7,   // Nicht 1.0!
-            roughness: 0.05,  // Blau
+            color: { r: 0.2, g: 0.5, b: 1.0 }, // Blau
+            metallic: 0.98,
         },
         {
             center: { x: -2.5, y: 0, z: -1 },
             radius: 0.7,
             color: { r: 1.0, g: 0.0, b: 0.0 },  // Rot
+            metallic: 0.0,
+        },
+        {
+            center: { x: 0, y: 4, z: 3 },
+            radius: 0.7,
+            color: { r: 1.0, g: 0.4, b: 0.0 },  // orange
+            metallic: 0.0,
         },
         {
             center: { x: 2.5, y: 0, z: -1 },
             radius: 0.7,
             color: { r: 0.0, g: 1.0, b: 0.0 },  // Grün
+            metallic: 0.0,
         },
         {
             center: { x: 0, y: -0.3, z: 2 },
             radius: 0.5,
             color: { r: 1.0, g: 1.0, b: 0.0 },  // Gelb
+            metallic: 0.0,
         },
     ],
     GROUND: {
@@ -263,9 +271,9 @@ export function getSpheresData(): Float32Array {
         data[offset + 4] = sphere.color.r;
         data[offset + 5] = sphere.color.g;
         data[offset + 6] = sphere.color.b;
-
+        data[offset + 7] = sphere.metallic;
         // Padding
-        data[offset + 7] = 0;
+        data[offset + 8] = 0;
     });
 
     return data;
