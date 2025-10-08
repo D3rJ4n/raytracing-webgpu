@@ -144,25 +144,27 @@ export class BufferManager {
             throw new Error('Device nicht verfügbar');
         }
 
-        this.logger.cache('Erstelle Farb-Cache-Buffer...');
+        this.logger.cache('Erstelle Cache-Buffer...');
 
         const pixelCount = width * height;
+        // Größe des Buffers berechnen
         const bufferSize = calculateCacheBufferSize(width, height);
-
+        // Buffer erstellen
         this.cacheBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.CACHE.LABEL,
             size: bufferSize,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
         });
-
+        // Füllt den Cache-Buffer initial mit Nullen
         const cacheData = new Uint32Array(pixelCount * BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL).fill(0);
+        // Das kopiert die Nullen vom CPU-RAM → GPU-VRAM
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
         this.logger.success(`Farb-Cache-Buffer erstellt: ${bufferSize.toLocaleString()} bytes`);
     }
 
     /**
- * 🌍 Scene Config Buffer erstellen (NEU)
+ * 🌍 Scene Config Buffer erstellen
  */
     private createSceneConfigBuffer(): void {
         if (!this.device) {

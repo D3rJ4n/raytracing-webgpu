@@ -75,9 +75,9 @@ const EPSILON: f32 = 0.001;
 // ===== RANDOM NUMBER GENERATOR =====
 
 fn pcgHash(input: u32) -> u32 {
-    var state = input * 747796405u + 2891336453u;
-    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
+    var state = input * 747796405u + 2891336453u;// Multiplikation mit großer Primzahl
+    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;// Bit-Shifts und XOR für Chaos
+    return (word >> 22u) ^ word; // Finales Mischen
 }
 
 fn randomFloat(seed: ptr<function, u32>) -> f32 {
@@ -125,6 +125,7 @@ fn getAverageColor(coords: vec2<i32>) -> vec3<f32> {
 // ===== CACHE FUNKTIONEN =====
 
 fn getCacheIndex(coords: vec2<i32>) -> u32 {
+    // Typumwandlung von i32 zu u32 und in eindimensionales Array umrechnen
     return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
 }
 
@@ -371,8 +372,9 @@ fn linearToSrgb(linear: vec3<f32>) -> vec3<f32> {
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     let pixelCoords = vec2<i32>(globalId.xy);
+    //Canvas größen holen
     let dimensions = vec2<i32>(i32(renderInfo.width), i32(renderInfo.height));
-    
+    // Pixel überprüfen
     if (pixelCoords.x >= dimensions.x || pixelCoords.y >= dimensions.y) {
         return;
     }
@@ -380,26 +382,37 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     let useCache = camera.sampleCount == 0u;
     
     if (useCache && isCacheValid(pixelCoords)) {
+        // Farbe auslesen
         let cachedColor = getCachedColor(pixelCoords);
+        // auf bildschirm schreiben
         textureStore(outputTexture, pixelCoords, cachedColor);
-        
+        // Gammakorrektur rückgängig machen, wegen Licht unterschied zu Bild und realität
         let linearColor = pow(cachedColor.rgb, vec3<f32>(2.2));
+        // Speichern im Accumulation Buffer
         accumulateColor(pixelCoords, linearColor);
         
         return;
     }
-    
+
+    // ==============================================
+    // random seed basierend auf pixel position und kamera seed
     var seed = u32(pixelCoords.x) + u32(pixelCoords.y) * renderInfo.width;
     seed += u32(camera.randomSeed1 * 1000000.0);
     seed = pcgHash(seed);
-    
+    // ==============================================
+
+
+    //UV Koordinaten umwandeln
     let baseUV = vec2<f32>(
         f32(pixelCoords.x) / f32(dimensions.x),
         f32(pixelCoords.y) / f32(dimensions.y)
     );
     
+    //erzeugt 2 zufallszahlen
     let jitter = randomFloat2(&seed);
+    //Pixel größe berechnen in UV
     let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
+    
     let uv = baseUV + (jitter - 0.5) * pixelSize;
     
     var ray: Ray;
