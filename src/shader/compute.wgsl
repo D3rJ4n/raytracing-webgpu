@@ -1,4 +1,4 @@
-// ===== WGSL COMPUTE SHADER MIT REFLEXIONEN =====
+// ===== WGSL COMPUTE SHADER MIT REFLEXIONEN UND CACHE =====
 
 // ===== STRUKTUREN =====
 
@@ -17,7 +17,7 @@ struct SphereData {
     center: vec3<f32>,
     radius: f32,
     color: vec3<f32>,
-    metallic: f32,      // NEU: 0.0 = diffuse, 1.0 = perfekt reflektiv
+    metallic: f32,
 }
 
 struct RenderInfo {
@@ -47,7 +47,7 @@ struct HitRecord {
     normal: vec3<f32>,
     material: u32,
     color: vec3<f32>,
-    metallic: f32,      // NEU
+    metallic: f32,
 }
 
 struct Ray {
@@ -68,7 +68,7 @@ struct Ray {
 // ===== KONSTANTEN =====
 
 const MAX_SPHERES: u32 = 10u;
-const SPHERE_COUNT: u32 = 5u;
+const SPHERE_COUNT: u32 = 10u;
 const PI: f32 = 3.14159265359;
 const EPSILON: f32 = 0.001;
 
@@ -120,6 +120,33 @@ fn getAverageColor(coords: vec2<i32>) -> vec3<f32> {
         return vec3<f32>(totalR / count, totalG / count, totalB / count);
     }
     return vec3<f32>(0.0);
+}
+
+// ===== CACHE FUNKTIONEN =====
+
+fn getCacheIndex(coords: vec2<i32>) -> u32 {
+    return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
+}
+
+fn isCacheValid(coords: vec2<i32>) -> bool {
+    let baseIndex = getCacheIndex(coords);
+    return pixelCache[baseIndex + 3u] == 1u;
+}
+
+fn setCachedColor(coords: vec2<i32>, color: vec4<f32>) {
+    let baseIndex = getCacheIndex(coords);
+    pixelCache[baseIndex + 0u] = u32(clamp(color.r * 255.0, 0.0, 255.0));
+    pixelCache[baseIndex + 1u] = u32(clamp(color.g * 255.0, 0.0, 255.0));
+    pixelCache[baseIndex + 2u] = u32(clamp(color.b * 255.0, 0.0, 255.0));
+    pixelCache[baseIndex + 3u] = 1u;
+}
+
+fn getCachedColor(coords: vec2<i32>) -> vec4<f32> {
+    let baseIndex = getCacheIndex(coords);
+    let r = f32(pixelCache[baseIndex + 0u]) / 255.0;
+    let g = f32(pixelCache[baseIndex + 1u]) / 255.0;
+    let b = f32(pixelCache[baseIndex + 2u]) / 255.0;
+    return vec4<f32>(r, g, b, 1.0);
 }
 
 // ===== CAMERA RAY =====
@@ -192,7 +219,6 @@ fn findClosestHit(ray: Ray) -> HitRecord {
     closest.hit = false;
     closest.t = 999999.0;
     
-    // Test alle Spheres
     for (var i = 0u; i < SPHERE_COUNT; i++) {
         let t = intersectSphere(ray.origin, ray.direction, i);
         if (t > 0.0 && t < closest.t) {
@@ -206,7 +232,6 @@ fn findClosestHit(ray: Ray) -> HitRecord {
         }
     }
     
-    // Test Ground Plane
     let tPlane = intersectPlane(ray.origin, ray.direction, sceneConfig.groundY);
     if (tPlane > 0.0 && tPlane < closest.t) {
         closest.hit = true;
@@ -215,7 +240,7 @@ fn findClosestHit(ray: Ray) -> HitRecord {
         closest.normal = vec3<f32>(0.0, 1.0, 0.0);
         closest.material = 100u;
         closest.color = vec3<f32>(0.6, 0.6, 0.6);
-        closest.metallic = 0.0;  // Ground ist nicht reflektiv
+        closest.metallic = 0.0;
     }
     
     return closest;
@@ -238,7 +263,7 @@ fn isInShadow(point: vec3<f32>, lightPos: vec3<f32>) -> bool {
     return false;
 }
 
-// ===== LIGHTING BERECHNUNG =====
+// ===== LIGHTING =====
 
 fn calculateLighting(hitRecord: HitRecord) -> vec3<f32> {
     let lightDir = normalize(sceneConfig.lightPos - hitRecord.point);
@@ -256,32 +281,32 @@ fn calculateLighting(hitRecord: HitRecord) -> vec3<f32> {
     return hitRecord.color * lighting;
 }
 
-// ===== REFLEXIONS-RAY BERECHNEN =====
+// ===== REFLEXION =====
 
 fn reflect(incident: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     return incident - 2.0 * dot(incident, normal) * normal;
 }
 
-// ===== FRESNEL-EFFEKT (vereinfacht) =====
+// ===== FRESNEL =====
 
 fn fresnelSchlick(cosTheta: f32, metallic: f32) -> f32 {
-    let F0 = mix(0.04, 1.0, metallic);  // Basis-Reflektivität
+    let F0 = mix(0.04, 1.0, metallic);
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
-// ===== HINTERGRUND-FARBE =====
+// ===== HINTERGRUND =====
 
 fn getBackgroundColor(direction: vec3<f32>) -> vec3<f32> {
     let t = 0.5 * (direction.y + 1.0);
     return mix(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.5, 0.7, 1.0), t);
 }
 
-// ===== HAUPT-RAYTRACING MIT REFLEXIONEN =====
+// ===== RAYTRACING MIT REFLEXIONEN =====
 
 fn traceRay(initialRay: Ray) -> vec3<f32> {
     var ray = initialRay;
     var finalColor = vec3<f32>(0.0);
-    var throughput = vec3<f32>(1.0);  // Wie viel Licht noch übertragen wird
+    var throughput = vec3<f32>(1.0);
     
     let maxBounces = i32(sceneConfig.maxBounces);
     let reflectionsEnabled = sceneConfig.reflectionsEnabled > 0.5;
@@ -290,17 +315,14 @@ fn traceRay(initialRay: Ray) -> vec3<f32> {
         let hit = findClosestHit(ray);
         
         if (!hit.hit) {
-            // Kein Treffer - Hintergrund hinzufügen
             finalColor += throughput * getBackgroundColor(ray.direction);
             break;
         }
         
-        // Fresnel-Effekt berechnen
         let viewDir = normalize(ray.origin - hit.point);
         let cosTheta = max(dot(viewDir, hit.normal), 0.0);
         let fresnel = fresnelSchlick(cosTheta, hit.metallic);
         
-        // Diffuse Komponente nur für nicht-metallische Oberflächen
         let diffuseAmount = (1.0 - hit.metallic) * (1.0 - fresnel);
         
         if (diffuseAmount > 0.01) {
@@ -308,32 +330,28 @@ fn traceRay(initialRay: Ray) -> vec3<f32> {
             finalColor += throughput * lighting * diffuseAmount;
         }
         
-        // Reflektions-Check
         if (!reflectionsEnabled || hit.metallic < 0.01) {
-            // Keine Reflexion - fertig
             break;
         }
         
-        // Reflektions-Komponente
         let reflectionStrength = fresnel * hit.metallic;
         
         if (reflectionStrength < sceneConfig.minContribution) {
-            // Reflexion zu schwach - abbrechen
             break;
         }
         
-        // Neuer Ray für Reflexion
         let reflectedDir = reflect(-viewDir, hit.normal);
-        ray.origin = hit.point + hit.normal * EPSILON;  // Leicht über der Oberfläche
+        ray.origin = hit.point + hit.normal * EPSILON;
         ray.direction = normalize(reflectedDir);
         
-        // Throughput reduzieren
-        // Für metallische Oberflächen: nur Reflexionsstärke, KEINE Farbeinfärbung
-        // Für nicht-metallische: Farbe wird einbezogen
-        let colorTint = mix(vec3<f32>(1.0), hit.color, 1.0 - hit.metallic);
-        throughput *= colorTint * reflectionStrength;
+        if (hit.metallic > 0.9) {
+            let tint = mix(hit.color, vec3<f32>(1.0), 0.8);
+            throughput *= tint * reflectionStrength;
+        } else {
+            let colorTint = mix(vec3<f32>(1.0), hit.color, 1.0 - hit.metallic);
+            throughput *= colorTint * reflectionStrength;
+        }
         
-        // Früher Abbruch wenn throughput zu klein
         if (max(max(throughput.r, throughput.g), throughput.b) < sceneConfig.minContribution) {
             break;
         }
@@ -359,6 +377,18 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         return;
     }
     
+    let useCache = camera.sampleCount == 0u;
+    
+    if (useCache && isCacheValid(pixelCoords)) {
+        let cachedColor = getCachedColor(pixelCoords);
+        textureStore(outputTexture, pixelCoords, cachedColor);
+        
+        let linearColor = pow(cachedColor.rgb, vec3<f32>(2.2));
+        accumulateColor(pixelCoords, linearColor);
+        
+        return;
+    }
+    
     var seed = u32(pixelCoords.x) + u32(pixelCoords.y) * renderInfo.width;
     seed += u32(camera.randomSeed1 * 1000000.0);
     seed = pcgHash(seed);
@@ -368,23 +398,23 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         f32(pixelCoords.y) / f32(dimensions.y)
     );
     
-    // Jittering für Anti-Aliasing
     let jitter = randomFloat2(&seed);
     let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
     let uv = baseUV + (jitter - 0.5) * pixelSize;
     
-    // Primärer Ray
     var ray: Ray;
     ray.origin = camera.position;
     ray.direction = getCameraRay(uv);
     
-    // Raytracing mit Reflexionen
     let sampleColor = traceRay(ray);
     
-    // Akkumulieren und anzeigen
     accumulateColor(pixelCoords, sampleColor);
     let averageColor = getAverageColor(pixelCoords);
     let finalColor = linearToSrgb(averageColor);
+    
+    if (useCache) {
+        setCachedColor(pixelCoords, vec4<f32>(finalColor, 1.0));
+    }
     
     textureStore(outputTexture, pixelCoords, vec4<f32>(finalColor, 1.0));
 }

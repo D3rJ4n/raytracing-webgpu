@@ -160,6 +160,36 @@ export const SCENE_CONFIG = {
             color: { r: 1.0, g: 1.0, b: 0.0 },  // Gelb
             metallic: 0.0,
         },
+        {
+            center: { x: -1.5, y: 0.5, z: 1.5 },
+            radius: 0.4,
+            color: { r: 1.0, g: 0.0, b: 1.0 }, // Magenta
+            metallic: 0.7,
+        },
+        {
+            center: { x: 1.5, y: 0.5, z: 1.5 },
+            radius: 0.4,
+            color: { r: 0.0, g: 1.0, b: 1.0 }, // Cyan
+            metallic: 0.8,
+        },
+        {
+            center: { x: -1.0, y: 1.5, z: -2.0 },
+            radius: 0.6,
+            color: { r: 1.0, g: 1.0, b: 1.0 }, // Weiß
+            metallic: 0.95,
+        },
+        {
+            center: { x: 1.0, y: 1.5, z: -2.0 },
+            radius: 0.6,
+            color: { r: 0.5, g: 0.5, b: 0.0 }, // Olivgrün
+            metallic: 0.0,
+        },
+        {
+            center: { x: 0, y: 0.3, z: -3.0 },
+            radius: 0.3,
+            color: { r: 1.0, g: 0.5, b: 0.5 }, // Rosa
+            metallic: 0.3,
+        },
     ],
     GROUND: {
         Y_POSITION: -1.0,  // Ebene bei y = -1 (unter der Kugel)
