@@ -10,11 +10,10 @@ import { CacheDebugger } from '../cache/CacheDebugger';
 import { StatusDisplay } from '../utils/StatusDisplay';
 import { Logger } from '../utils/Logger';
 import { CANVAS_CONFIG, STATUS_CONFIG } from '../utils/Constants';
+import * as THREE from 'three';
 
 /**
- * 🎯 WebGPURaytracerApp - Einfache Haupt-App-Klasse
- * 
- * Ersetzt die monolithische main.ts mit sauberer Modulstruktur
+ * 🎯 WebGPURaytracerApp - Haupt-App mit Three.js Scene Integration
  */
 export class WebGPURaytracerApp {
     // ===== DOM-ELEMENTE =====
@@ -23,7 +22,7 @@ export class WebGPURaytracerApp {
 
     // ===== SUBSYSTEME =====
     private webgpuDevice: WebGPUDevice;
-    private scene: Scene;
+    public scene: Scene;  // public für direkten Zugriff in Scene.ts
     private bufferManager: BufferManager;
     private textureManager: TextureManager;
     private computePipeline: ComputePipeline;
@@ -31,6 +30,8 @@ export class WebGPURaytracerApp {
     private renderer: Renderer;
     private pixelCache: PixelCache;
     private cacheDebugger: CacheDebugger;
+
+    // ===== SUPERSAMPLING STATE =====
     private currentSample: number = 0;
     private maxSamples: number = 0;
     private isAccumulating: boolean = false;
@@ -45,7 +46,6 @@ export class WebGPURaytracerApp {
         this.logger = Logger.getInstance();
         this.logger.init('Erstelle WebGPU Raytracer App...');
 
-        // DOM-Elemente finden
         this.canvas = document.getElementById(CANVAS_CONFIG.ID) as HTMLCanvasElement;
         if (!this.canvas) {
             throw new Error(`Canvas mit ID '${CANVAS_CONFIG.ID}' nicht gefunden`);
@@ -54,7 +54,6 @@ export class WebGPURaytracerApp {
         this.statusDisplay = new StatusDisplay(STATUS_CONFIG.ELEMENT_ID);
         this.logger.init(`Canvas gefunden: ${this.canvas.width}x${this.canvas.height}`);
 
-        // Subsysteme erstellen
         this.webgpuDevice = new WebGPUDevice();
         this.scene = new Scene();
         this.bufferManager = new BufferManager();
@@ -96,12 +95,18 @@ export class WebGPURaytracerApp {
                 this.canvas.height
             );
 
+            // ⭐ Three.js Daten für Buffer holen
+            const lightPosition = this.scene.getPrimaryLightPosition();
+            const ambientIntensity = this.scene.getAmbientIntensity();
+
             this.bufferManager.initialize(
                 this.webgpuDevice.getDevice(),
                 this.canvas.width,
                 this.canvas.height,
                 this.scene.getCameraData(),
-                this.scene.getSpheresData()
+                this.scene.getSpheresData(),
+                lightPosition,
+                ambientIntensity
             );
 
             // 4. Cache-System initialisieren
@@ -150,7 +155,7 @@ export class WebGPURaytracerApp {
             await this.renderer.renderFrame(this.canvas);
 
             this.initialized = true;
-            this.statusDisplay.showSuccess('✅ WebGPU Raytracer mit Cache läuft!');
+            this.statusDisplay.showSuccess('✅ WebGPU Raytracer mit Three.js läuft!');
             this.logger.success('Initialisierung erfolgreich abgeschlossen');
 
         } catch (error) {
@@ -159,6 +164,10 @@ export class WebGPURaytracerApp {
             throw error;
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CACHE & RENDERING METHODEN
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
      * 🧪 Cache-Debug-Test starten
@@ -209,44 +218,8 @@ export class WebGPURaytracerApp {
     }
 
     /**
-     * 📝 App-Status abrufen
+     * 🎨 Progressive Supersampling starten
      */
-    public getStatus(): {
-        initialized: boolean;
-        frameCount: number;
-        canvasSize: { width: number; height: number };
-    } {
-        return {
-            initialized: this.initialized,
-            frameCount: this.initialized ? this.renderer.getFrameCount() : 0,
-            canvasSize: {
-                width: this.canvas.width,
-                height: this.canvas.height
-            }
-        };
-    }
-
-    /**
-     * 🧹 Ressourcen aufräumen
-     */
-    public cleanup(): void {
-        this.logger.info('🧹 Räume Ressourcen auf...');
-
-        if (this.bufferManager) {
-            this.bufferManager.cleanup();
-        }
-
-        if (this.textureManager) {
-            this.textureManager.cleanup();
-        }
-
-        this.initialized = false;
-        this.logger.info('✅ Cleanup abgeschlossen');
-    }
-
-    /**
- * 🎨 Progressive Supersampling starten
- */
     public async startProgressiveSupersampling(maxSamples: number = 16): Promise<void> {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -254,26 +227,21 @@ export class WebGPURaytracerApp {
 
         this.logger.info(`🎨 Starte Progressive Supersampling: ${maxSamples} samples`);
 
-        // Accumulation zurücksetzen
         this.bufferManager.resetAccumulation(this.canvas.width, this.canvas.height);
         this.currentSample = 0;
         this.maxSamples = maxSamples;
         this.isAccumulating = true;
 
-        // Progressive Rendering
         const startTime = performance.now();
 
         for (let sample = 0; sample < maxSamples; sample++) {
             this.currentSample = sample + 1;
 
-            // Kamera-Daten mit Random Seeds aktualisieren
             const baseCameraData = this.scene.getCameraData();
             this.bufferManager.updateCameraDataWithRandomSeeds(baseCameraData, sample);
 
-            // Frame rendern
             await this.renderer.renderFrame(this.canvas);
 
-            // Progress anzeigen
             if (sample % 4 === 0 || sample === maxSamples - 1) {
                 const progress = ((sample + 1) / maxSamples * 100).toFixed(0);
                 this.statusDisplay.showInfo(
@@ -281,7 +249,6 @@ export class WebGPURaytracerApp {
                 );
             }
 
-            // Kurze Pause für UI-Updates (alle 4 Samples)
             if (sample % 4 === 0 && sample < maxSamples - 1) {
                 await new Promise(resolve => setTimeout(resolve, 1));
             }
@@ -318,105 +285,44 @@ export class WebGPURaytracerApp {
     }
 
     /**
-     * 🎯 Single-Sample Frame rendern (ohne Accumulation)
+     * 📊 App-Status abrufen
      */
-    public async renderSingleFrame(): Promise<void> {
-        if (!this.initialized) {
-            throw new Error('App nicht initialisiert');
-        }
-
-        // Accumulation zurücksetzen für sauberen Single-Frame
-        this.resetAccumulation();
-
-        // Kamera-Daten ohne Random Seeds (oder mit fixen Seeds)
-        const baseCameraData = this.scene.getCameraData();
-        this.bufferManager.updateCameraDataWithRandomSeeds(baseCameraData, 0);
-
-        // Frame rendern
-        await this.renderer.renderFrame(this.canvas);
-    }
-
-    /**
-     * 📊 Supersampling-Status abrufen
-     */
-    public getSupersamplingStatus(): {
-        isAccumulating: boolean;
-        currentSample: number;
-        maxSamples: number;
-        progress: number;
+    public getStatus(): {
+        initialized: boolean;
+        frameCount: number;
+        canvasSize: { width: number; height: number };
+        sphereCount: number;
     } {
         return {
-            isAccumulating: this.isAccumulating,
-            currentSample: this.currentSample,
-            maxSamples: this.maxSamples,
-            progress: this.maxSamples > 0 ? (this.currentSample / this.maxSamples) * 100 : 0
+            initialized: this.initialized,
+            frameCount: this.initialized ? this.renderer.getFrameCount() : 0,
+            canvasSize: {
+                width: this.canvas.width,
+                height: this.canvas.height
+            },
+            sphereCount: this.initialized ? this.scene.getSphereCount() : 0
         };
     }
 
     /**
-     * ⚡ Quick Supersampling (4 Samples)
+     * 🧹 Ressourcen aufräumen
      */
-    public async quickSupersampling(): Promise<void> {
-        await this.startProgressiveSupersampling(4);
-    }
+    public cleanup(): void {
+        this.logger.info('🧹 Räume Ressourcen auf...');
 
-    /**
-     * 🎨 High Quality Supersampling (16 Samples)
-     */
-    public async highQualitySupersampling(): Promise<void> {
-        await this.startProgressiveSupersampling(16);
-    }
+        if (this.bufferManager) {
+            this.bufferManager.cleanup();
+        }
 
-    /**
-     * 💎 Extreme Quality Supersampling (64 Samples)
-     */
-    public async extremeSupersampling(): Promise<void> {
-        await this.startProgressiveSupersampling(64);
-    }
+        if (this.textureManager) {
+            this.textureManager.cleanup();
+        }
 
-    /**
-     * 🔬 Supersampling-Vergleichstest
-     */
-    public async compareSupersampling(): Promise<{
-        noAA: number;
-        samples4: number;
-        samples16: number;
-    }> {
-        this.logger.info('🔬 Starte Supersampling-Vergleichstest...');
+        if (this.scene) {
+            this.scene.cleanup();
+        }
 
-        // Test 1: Ohne AA
-        this.resetAccumulation();
-        const time1 = performance.now();
-        await this.renderSingleFrame();
-        const noAATime = performance.now() - time1;
-        this.logger.info(`  Ohne AA: ${noAATime.toFixed(1)}ms`);
-
-        await new Promise(r => setTimeout(r, 500));
-
-        // Test 2: 4x AA
-        this.resetAccumulation();
-        const time2 = performance.now();
-        await this.startProgressiveSupersampling(4);
-        const aa4Time = performance.now() - time2;
-        this.logger.info(`  4x AA: ${aa4Time.toFixed(1)}ms`);
-
-        await new Promise(r => setTimeout(r, 500));
-
-        // Test 3: 16x AA
-        this.resetAccumulation();
-        const time3 = performance.now();
-        await this.startProgressiveSupersampling(16);
-        const aa16Time = performance.now() - time3;
-        this.logger.info(`  16x AA: ${aa16Time.toFixed(1)}ms`);
-
-        this.logger.info('📊 Vergleich abgeschlossen:');
-        this.logger.info(`  Overhead 4x:  ${(aa4Time / noAATime).toFixed(1)}x`);
-        this.logger.info(`  Overhead 16x: ${(aa16Time / noAATime).toFixed(1)}x`);
-
-        return {
-            noAA: noAATime,
-            samples4: aa4Time,
-            samples16: aa16Time
-        };
+        this.initialized = false;
+        this.logger.info('✅ Cleanup abgeschlossen');
     }
 }

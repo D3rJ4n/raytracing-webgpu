@@ -37,7 +37,7 @@ struct SceneConfig {
     reflectionsEnabled: f32,
     maxBounces: f32,
     minContribution: f32,
-    _pad4: f32,
+    ambientStrength: f32,
 }
 
 struct HitRecord {
@@ -67,8 +67,8 @@ struct Ray {
 
 // ===== KONSTANTEN =====
 
-const MAX_SPHERES: u32 = 10u;
-const SPHERE_COUNT: u32 = 10u;
+const MAX_SPHERES: u32 = 11u;
+const SPHERE_COUNT: u32 = 11u;
 const PI: f32 = 3.14159265359;
 const EPSILON: f32 = 0.001;
 
@@ -130,11 +130,26 @@ fn getCacheIndex(coords: vec2<i32>) -> u32 {
 }
 
 fn isCacheValid(coords: vec2<i32>) -> bool {
+    // Prüft ob für diesen Pixel bereits eine gültige Farbe im Cache liegt
+    //
+    // Ablauf:
+    // 1. Hole Array-Index für diesen Pixel
+    // 2. Springe zum Valid-Flag (baseIndex + 3)
+    // 3. Wenn Flag == 1u → Pixel ist gecacht 
+    //    Wenn Flag == 0u → Pixel muss neu berechnet werden 
     let baseIndex = getCacheIndex(coords);
     return pixelCache[baseIndex + 3u] == 1u;
 }
 
 fn setCachedColor(coords: vec2<i32>, color: vec4<f32>) {
+     // Speichert eine berechnete Farbe im Cache für zukünftige Frames
+    //
+    // Ablauf:
+    // 1. Berechne Basis-Index für diesen Pixel
+    // 2. Konvertiere Float-Farben (0.0-1.0) zu Uint8 (0-255)
+    //    → Spart Speicher: 4 Bytes statt 16 Bytes pro Pixel!
+    // 3. Schreibe R, G, B in die ersten 3 Slots
+    // 4. Setze Valid-Flag auf 1 → "Dieser Pixel ist jetzt gecacht"
     let baseIndex = getCacheIndex(coords);
     pixelCache[baseIndex + 0u] = u32(clamp(color.r * 255.0, 0.0, 255.0));
     pixelCache[baseIndex + 1u] = u32(clamp(color.g * 255.0, 0.0, 255.0));
@@ -143,6 +158,14 @@ fn setCachedColor(coords: vec2<i32>, color: vec4<f32>) {
 }
 
 fn getCachedColor(coords: vec2<i32>) -> vec4<f32> {
+    // Liest eine gespeicherte Farbe aus dem Cache
+    //
+    // Ablauf:
+    // 1. Hole Array-Index für diesen Pixel
+    // 2. Lese R, G, B aus den ersten 3 Slots
+    // 3. Konvertiere Uint8 (0-255) zurück zu Float (0.0-1.0)
+    //    → Division durch 255.0
+    // 4. Gib Farbe als vec4 zurück (Alpha immer 1.0)
     let baseIndex = getCacheIndex(coords);
     let r = f32(pixelCache[baseIndex + 0u]) / 255.0;
     let g = f32(pixelCache[baseIndex + 1u]) / 255.0;
@@ -269,7 +292,7 @@ fn isInShadow(point: vec3<f32>, lightPos: vec3<f32>) -> bool {
 fn calculateLighting(hitRecord: HitRecord) -> vec3<f32> {
     let lightDir = normalize(sceneConfig.lightPos - hitRecord.point);
     let diffuse = max(dot(hitRecord.normal, lightDir), 0.0);
-    let ambient = 0.2;
+    let ambient = sceneConfig.ambientStrength;  
     
     var shadowFactor = 1.0;
     if (sceneConfig.shadowEnabled > 0.5 && diffuse > 0.0) {
@@ -285,13 +308,18 @@ fn calculateLighting(hitRecord: HitRecord) -> vec3<f32> {
 // ===== REFLEXION =====
 
 fn reflect(incident: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    // berechnet den neuen Reflektierten Strahl
     return incident - 2.0 * dot(incident, normal) * normal;
 }
 
 // ===== FRESNEL =====
-
+//Der Fresnel-Effekt beschreibt:
+//"Wie stark reflektiert eine Oberfläche, abhängig vom Betrachtungswinkel?"
 fn fresnelSchlick(cosTheta: f32, metallic: f32) -> f32 {
     let F0 = mix(0.04, 1.0, metallic);
+    // F0 = Basis-Reflexion bei senkrechtem Blick
+    // Nicht-Metall (metallic=0): F0 = 0.04 (4% Reflexion)
+    // Metall (metallic=1):       F0 = 1.0 (100% Reflexion)
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
@@ -303,6 +331,9 @@ fn getBackgroundColor(direction: vec3<f32>) -> vec3<f32> {
 }
 
 // ===== RAYTRACING MIT REFLEXIONEN =====
+//ray = Startstrahl von der Kamera
+//finalColor = Gesammelte Farbe (startet bei Schwarz)
+//throughput = "Wie viel Licht kommt noch durch?" (startet bei 100%)
 
 fn traceRay(initialRay: Ray) -> vec3<f32> {
     var ray = initialRay;
@@ -315,19 +346,25 @@ fn traceRay(initialRay: Ray) -> vec3<f32> {
     for (var bounce = 0; bounce < maxBounces; bounce++) {
         let hit = findClosestHit(ray);
         
+        // Kein Treffer → Hintergrundfarbe zurckgeben
         if (!hit.hit) {
             finalColor += throughput * getBackgroundColor(ray.direction);
             break;
         }
-        
+        // 1. Blickrichtung berechnen
         let viewDir = normalize(ray.origin - hit.point);
+        // 2. Winkel zwischen Blick und Oberfläche
         let cosTheta = max(dot(viewDir, hit.normal), 0.0);
+        // 3. Reflektionsstärke berechnen
         let fresnel = fresnelSchlick(cosTheta, hit.metallic);
-        
+        //4. Diffuse Lichtanteil berechnen
         let diffuseAmount = (1.0 - hit.metallic) * (1.0 - fresnel);
         
+        // Gibt es noch umgebungsbeleuchtung?
         if (diffuseAmount > 0.01) {
+            // Licht berechnen
             let lighting = calculateLighting(hit);
+            // Endfarbe berechnen
             finalColor += throughput * lighting * diffuseAmount;
         }
         
@@ -336,23 +373,26 @@ fn traceRay(initialRay: Ray) -> vec3<f32> {
         }
         
         let reflectionStrength = fresnel * hit.metallic;
-        
+        // Wenn zuwenig Licht übrig ist, abbrechen
         if (reflectionStrength < sceneConfig.minContribution) {
             break;
         }
-        
+        //Reflexionsrichtung
         let reflectedDir = reflect(-viewDir, hit.normal);
+        // Neuen Startpunkt setzen
         ray.origin = hit.point + hit.normal * EPSILON;
+        // Richtung normalisieren
         ray.direction = normalize(reflectedDir);
-        
+
+        // Bei echt Metallischen Oberflächen, wird die Farbe der Oberfläche mit der Reflexion gemischt
         if (hit.metallic > 0.9) {
             let tint = mix(hit.color, vec3<f32>(1.0), 0.8);
             throughput *= tint * reflectionStrength;
-        } else {
+        } else { // Nicht metallische Oberflächen reflektieren stärker
             let colorTint = mix(vec3<f32>(1.0), hit.color, 1.0 - hit.metallic);
             throughput *= colorTint * reflectionStrength;
         }
-        
+        // Gibt den höchsten Farbwert und checkt ob es sich noch lohnt ihn auszugeben
         if (max(max(throughput.r, throughput.g), throughput.b) < sceneConfig.minContribution) {
             break;
         }
@@ -412,7 +452,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     let jitter = randomFloat2(&seed);
     //Pixel größe berechnen in UV
     let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
-    
+
     let uv = baseUV + (jitter - 0.5) * pixelSize;
     
     var ray: Ray;

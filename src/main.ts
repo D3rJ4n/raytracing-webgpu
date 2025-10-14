@@ -14,7 +14,10 @@ async function main(): Promise<void> {
         // Globale Kommandos für Console
         (window as any).app = app;
 
-        // Standard-Kommandos
+        // ═══════════════════════════════════════════════════════════
+        // STANDARD-KOMMANDOS
+        // ═══════════════════════════════════════════════════════════
+
         (window as any).renderFrame = async () => {
             const startTime = performance.now();
             await app.renderFrame();
@@ -22,7 +25,10 @@ async function main(): Promise<void> {
             console.log(`🎬 Frame: ${renderTime.toFixed(1)}ms`);
         };
 
-        // NEU: Supersampling-Kommandos
+        // ═══════════════════════════════════════════════════════════
+        // SUPERSAMPLING-KOMMANDOS
+        // ═══════════════════════════════════════════════════════════
+
         (window as any).startSupersampling = async (samples = 16) => {
             console.log(`🎨 Starte Progressive Supersampling mit ${samples} samples...`);
             await app.startProgressiveSupersampling(samples);
@@ -71,7 +77,10 @@ async function main(): Promise<void> {
             console.log('\nVergleich abgeschlossen - achte auf die Kanten!');
         };
 
-        // Cache-Kommandos (bestehend)
+        // ═══════════════════════════════════════════════════════════
+        // CACHE-KOMMANDOS
+        // ═══════════════════════════════════════════════════════════
+
         (window as any).testCache = async () => {
             console.log('\n📊 Cache-Test:');
             const time1 = performance.now();
@@ -96,7 +105,6 @@ async function main(): Promise<void> {
             }
         };
 
-        // NEU: Verbesserter Cache-Test
         (window as any).testCacheProper = async () => {
             console.log('\n=== 🔍 Detaillierter Cache-Test ===\n');
 
@@ -159,14 +167,6 @@ async function main(): Promise<void> {
             }
         };
 
-        // NEU: Cache-Visualisierung
-        (window as any).visualizeCache = async () => {
-            console.log('🎨 Cache-Visualisierung wird erstellt...');
-            console.log('   Grün = Cache Hit');
-            console.log('   Rot  = Cache Miss');
-            console.log('   (Feature noch nicht implementiert)');
-        };
-
         (window as any).resetCache = () => {
             console.log('🗑️  Cache reset');
             app.resetCache();
@@ -177,7 +177,10 @@ async function main(): Promise<void> {
             await app.showCacheStatistics();
         };
 
-        // Info ausgeben
+        // ═══════════════════════════════════════════════════════════
+        // COMMAND-LISTE AUSGEBEN
+        // ═══════════════════════════════════════════════════════════
+
         console.log('\n' + '='.repeat(60));
         console.log('🎮 WebGPU Raytracer - Kommandos');
         console.log('='.repeat(60));
@@ -202,14 +205,6 @@ async function main(): Promise<void> {
         console.log('💡 Tipp: Starte mit "testCacheProper()" um zu sehen ob');
         console.log('   der Cache funktioniert!');
         console.log('='.repeat(60) + '\n');
-
-        // Automatischer Demo-Start (deaktiviert für bessere Übersicht)
-        // setTimeout(async () => {
-        //     console.log('\nStarte automatische Demo in 2 Sekunden...');
-        //     setTimeout(async () => {
-        //         await (window as any).quickSupersampling();
-        //     }, 2000);
-        // }, 500);
 
         logger.success('✅ Raytracer bereit! Tippe "testCacheProper()" in der Console.');
 
