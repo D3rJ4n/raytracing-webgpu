@@ -4,18 +4,86 @@ import { Logger } from './utils/Logger';
 async function main(): Promise<void> {
     const logger = Logger.getInstance();
     logger.setMinimalMode(true);
+    logger.setShowFrameDetails(false); // ← Frame-Details komplett aus
 
     try {
-        logger.success('🚀 Starte WebGPU Raytracer mit Supersampling...');
+        logger.success('🚀 Starte WebGPU Raytracer mit 200 Kugeln...');
 
         const app = new WebGPURaytracerApp();
         await app.initialize();
 
-        // Globale Kommandos für Console
         (window as any).app = app;
 
         // ═══════════════════════════════════════════════════════════
-        // STANDARD-KOMMANDOS
+        // AUTOMATISCHER PERFORMANCE-TEST BEIM START
+        // ═══════════════════════════════════════════════════════════
+
+        console.log('\n' + '='.repeat(70));
+        console.log('🚀 AUTOMATISCHER PERFORMANCE-TEST - 200 KUGELN');
+        console.log('='.repeat(70) + '\n');
+
+        // Kurz warten für Initialisierung
+        await new Promise(r => setTimeout(r, 500));
+
+        // ===== TEST 1: CACHE-FUNKTIONALITÄT =====
+        await app.resetCache();
+        app.resetAccumulation();
+        await new Promise(r => setTimeout(r, 200));
+
+        const time1Start = performance.now();
+        await app.renderFrame();
+        const time1 = performance.now() - time1Start;
+
+        await new Promise(r => setTimeout(r, 200));
+
+        const time2Start = performance.now();
+        await app.renderFrame();
+        const time2 = performance.now() - time2Start;
+
+        const speedup = time1 / time2;
+
+        // ===== TEST 2: DURCHSCHNITTLICHE PERFORMANCE (10 FRAMES) =====
+        app.getPerformanceMonitor().reset();
+
+        for (let i = 0; i < 10; i++) {
+            await app.renderFrame();
+        }
+
+        const avgStats = app.getPerformanceMonitor().getStats();
+
+        // ===== TEST 3: SUPERSAMPLING =====
+        app.resetAccumulation();
+        const ssStart = performance.now();
+
+        for (let sample = 0; sample < 4; sample++) {
+            const baseCameraData = app.scene.getCameraData();
+            app.getBufferManager().updateCameraDataWithRandomSeeds(baseCameraData, sample);
+            await app.renderFrame();
+        }
+
+        const ssTime = performance.now() - ssStart;
+        const avgTimePerSample = ssTime / 4;
+
+        // ===== ZUSAMMENFASSUNG =====
+        console.log('\n\n' + '='.repeat(70));
+        console.log('🎯 ZUSAMMENFASSUNG - 200 KUGELN PERFORMANCE');
+        console.log('='.repeat(70));
+        console.log(`Szene:                200 Kugeln (25x8 Rechteck)`);
+        console.log(`Cache:                ${speedup > 1.3 ? '✅ Funktioniert' : '⚠️ Suboptimal'} (${speedup.toFixed(2)}x Speedup)`);
+        console.log(`Ø Frame-Zeit:         ${avgStats.frameTime.average.toFixed(2)}ms`);
+        console.log(`Ø FPS:                ${avgStats.fps.current.toFixed(1)}`);
+        console.log(`Cache Hit Rate:       ${avgStats.cache.hitRate.toFixed(1)}%`);
+        console.log(`Supersampling:        ✅ Funktioniert (${avgTimePerSample.toFixed(2)}ms/sample)`);
+        console.log('='.repeat(70) + '\n');
+
+        logger.success('✅ Automatischer Performance-Test abgeschlossen!');
+        logger.success('📊 Performance-Display oben rechts aktiv');
+
+        // Performance-Display anzeigen
+        app.togglePerformanceDisplay(true);
+
+        // ═══════════════════════════════════════════════════════════
+        // VERFÜGBARE COMMANDS (FÜR WEITERE TESTS)
         // ═══════════════════════════════════════════════════════════
 
         (window as any).renderFrame = async () => {
@@ -25,13 +93,9 @@ async function main(): Promise<void> {
             console.log(`🎬 Frame: ${renderTime.toFixed(1)}ms`);
         };
 
-        // ═══════════════════════════════════════════════════════════
-        // SUPERSAMPLING-KOMMANDOS
-        // ═══════════════════════════════════════════════════════════
-
-        (window as any).startSupersampling = async (samples = 16) => {
-            console.log(`🎨 Starte Progressive Supersampling mit ${samples} samples...`);
-            await app.startProgressiveSupersampling(samples);
+        (window as any).togglePerf = () => {
+            app.togglePerformanceDisplay();
+            console.log('Performance-Display umgeschaltet');
         };
 
         (window as any).quickSupersampling = async () => {
@@ -39,174 +103,123 @@ async function main(): Promise<void> {
             await app.startProgressiveSupersampling(4);
         };
 
-        (window as any).highQualitySupersampling = async () => {
-            console.log('High Quality Supersampling (16 samples)...');
-            await app.startProgressiveSupersampling(16);
-        };
-
-        (window as any).extremeSupersampling = async () => {
-            console.log('Extreme Quality Supersampling (64 samples)...');
-            await app.startProgressiveSupersampling(64);
-        };
-
-        (window as any).resetAccumulation = () => {
-            console.log('Accumulation zurückgesetzt');
-            app.resetAccumulation();
-        };
-
-        (window as any).compareQuality = async () => {
-            console.log('\n=== Qualitätsvergleich ===\n');
-
-            // 1. Single Sample (kein AA)
-            console.log('1. Ohne Anti-Aliasing...');
-            app.resetAccumulation();
-            await app.renderFrame();
-            await new Promise(r => setTimeout(r, 1000));
-
-            // 2. Mit 4 Samples
-            console.log('2. Mit 4x Supersampling...');
-            app.resetAccumulation();
-            await app.startProgressiveSupersampling(4);
-            await new Promise(r => setTimeout(r, 1000));
-
-            // 3. Mit 16 Samples
-            console.log('3. Mit 16x Supersampling...');
-            app.resetAccumulation();
-            await app.startProgressiveSupersampling(16);
-
-            console.log('\nVergleich abgeschlossen - achte auf die Kanten!');
-        };
-
-        // ═══════════════════════════════════════════════════════════
-        // CACHE-KOMMANDOS
-        // ═══════════════════════════════════════════════════════════
-
-        (window as any).testCache = async () => {
-            console.log('\n📊 Cache-Test:');
-            const time1 = performance.now();
-            await app.renderFrame();
-            const renderTime1 = performance.now() - time1;
-
-            await app.showCacheStatistics();
-
-            const time2 = performance.now();
-            await app.renderFrame();
-            const renderTime2 = performance.now() - time2;
-
-            await app.showCacheStatistics();
-
-            const speedup = renderTime1 / renderTime2;
-            console.log(`\n📈 Ergebnis: ${renderTime1.toFixed(1)}ms -> ${renderTime2.toFixed(1)}ms (${speedup.toFixed(1)}x)`);
-
-            if (speedup > 1.5) {
-                console.log('✅ Cache funktioniert!');
-            } else {
-                console.log('⚠️ Cache-Speedup gering');
-            }
-        };
-
-        (window as any).testCacheProper = async () => {
-            console.log('\n=== 🔍 Detaillierter Cache-Test ===\n');
-
-            // 1. Vorbereitung
-            console.log('🧹 Bereite Test vor...');
-            app.resetCache();
-            app.resetAccumulation();
-            await new Promise(r => setTimeout(r, 200));
-
-            // 2. Erster Frame - OHNE Cache (Cold Start)
-            console.log('\n❄️  FRAME 1 (COLD - kein Cache):');
-            console.log('   Status: Alle Pixel müssen berechnet werden');
-
-            const time1Start = performance.now();
-            await app.renderFrame();
-            const time1 = performance.now() - time1Start;
-
-            console.log(`   ⏱️  Zeit: ${time1.toFixed(2)}ms`);
-            await app.showCacheStatistics();
-
-            await new Promise(r => setTimeout(r, 200));
-
-            // 3. Zweiter Frame - MIT Cache (Warm)
-            console.log('\n🔥 FRAME 2 (WARM - aus Cache):');
-            console.log('   Status: Alle Pixel sollten aus Cache kommen');
-
-            const time2Start = performance.now();
-            await app.renderFrame();
-            const time2 = performance.now() - time2Start;
-
-            console.log(`   ⏱️  Zeit: ${time2.toFixed(2)}ms`);
-            await app.showCacheStatistics();
-
-            // 4. Auswertung
-            console.log('\n' + '='.repeat(50));
-            console.log('📊 ERGEBNIS:');
-            console.log('='.repeat(50));
-            console.log(`Frame 1 (ohne Cache): ${time1.toFixed(2)}ms`);
-            console.log(`Frame 2 (mit Cache):  ${time2.toFixed(2)}ms`);
-
-            const speedup = time1 / time2;
-            const saved = time1 - time2;
-            const savedPercent = (saved / time1 * 100).toFixed(1);
-
-            console.log(`Speedup:              ${speedup.toFixed(2)}x`);
-            console.log(`Zeit gespart:         ${saved.toFixed(2)}ms (${savedPercent}%)`);
-
-            console.log('='.repeat(50));
-
-            if (speedup > 2.0) {
-                console.log('\n🎉 Cache funktioniert AUSGEZEICHNET! 🚀');
-            } else if (speedup > 1.3) {
-                console.log('\n✅ Cache funktioniert gut!');
-            } else if (speedup > 1.05) {
-                console.log('\n⚠️  Cache funktioniert, aber Speedup ist gering');
-                console.log('    (GPU-Cache oder einfache Szene könnte Effekt reduzieren)');
-            } else {
-                console.log('\n❌ Cache scheint nicht zu funktionieren');
-                console.log('    Beide Frames sind gleich schnell');
-            }
-        };
-
         (window as any).resetCache = () => {
             console.log('🗑️  Cache reset');
             app.resetCache();
         };
 
-        (window as any).checkCache = async () => {
-            console.log('\n📊 Cache-Status:');
-            await app.showCacheStatistics();
+        (window as any).benchmark = async (frames = 100) => {
+            console.log(`\n=== 🎯 BENCHMARK: ${frames} Frames ===\n`);
+
+            app.getPerformanceMonitor().reset();
+
+            console.log('Starte Benchmark...');
+            const startTime = performance.now();
+
+            for (let i = 0; i < frames; i++) {
+                await app.renderFrame();
+
+                if (i % 10 === 0) {
+                    const progress = ((i / frames) * 100).toFixed(0);
+                    console.log(`Progress: ${i}/${frames} (${progress}%)`);
+                }
+            }
+
+            const totalTime = performance.now() - startTime;
+            const avgFrameTime = totalTime / frames;
+            const avgFPS = 1000 / avgFrameTime;
+
+            console.log('\n' + '='.repeat(60));
+            console.log('📊 BENCHMARK ERGEBNIS:');
+            console.log('='.repeat(60));
+            console.log(`Frames gerendert:     ${frames}`);
+            console.log(`Gesamtzeit:           ${totalTime.toFixed(2)} ms`);
+            console.log(`Ø Frame-Zeit:         ${avgFrameTime.toFixed(2)} ms`);
+            console.log(`Ø FPS:                ${avgFPS.toFixed(1)}`);
+            console.log('='.repeat(60));
+
+            const stats = app.getPerformanceMonitor().getStats();
+            console.log(`Cache Hit Rate:       ${stats.cache.hitRate.toFixed(1)}%`);
         };
 
         // ═══════════════════════════════════════════════════════════
-        // COMMAND-LISTE AUSGEBEN
+        // KAMERA-ANIMATIONS-KOMMANDOS (NEU!)
         // ═══════════════════════════════════════════════════════════
 
-        console.log('\n' + '='.repeat(60));
-        console.log('🎮 WebGPU Raytracer - Kommandos');
-        console.log('='.repeat(60));
+        (window as any).rotateCamera = () => {
+            app.scene.startCameraRotation();
+            console.log('🎬 Kamera-Rotation gestartet!');
+            console.log('💡 Nutze renderLoop() um kontinuierlich zu rendern');
+        };
 
-        console.log('\n📷 Basis:');
-        console.log('  renderFrame()              - Einzelnen Frame rendern');
+        (window as any).stopCamera = () => {
+            app.scene.stopCameraRotation();
+            console.log('⏸️ Kamera-Rotation gestoppt');
+        };
 
-        console.log('\n✨ Supersampling (Anti-Aliasing):');
-        console.log('  quickSupersampling()       - 4x AA (schnell)');
-        console.log('  highQualitySupersampling() - 16x AA (empfohlen)');
-        console.log('  extremeSupersampling()     - 64x AA (sehr langsam)');
-        console.log('  resetAccumulation()        - Samples zurücksetzen');
-        console.log('  compareQuality()           - Vorher/Nachher Demo');
+        (window as any).setSpeed = (speed: number) => {
+            app.scene.setRotationSpeed(speed);
+            console.log(`⚙️ Rotations-Geschwindigkeit: ${speed}°/Frame`);
+        };
 
-        console.log('\n💾 Cache-System:');
-        console.log('  testCacheProper()          - Detaillierter Cache-Test ⭐');
-        console.log('  testCache()                - Schneller Cache-Test');
-        console.log('  resetCache()               - Cache leeren');
-        console.log('  checkCache()               - Cache-Status anzeigen');
+        (window as any).renderLoop = async (maxFrames = 360) => {
+            console.log(`\n🎬 Starte Render-Loop (max ${maxFrames} Frames)`);
 
-        console.log('\n' + '='.repeat(60));
-        console.log('💡 Tipp: Starte mit "testCacheProper()" um zu sehen ob');
-        console.log('   der Cache funktioniert!');
-        console.log('='.repeat(60) + '\n');
+            app.getPerformanceMonitor().reset();
 
-        logger.success('✅ Raytracer bereit! Tippe "testCacheProper()" in der Console.');
+            for (let i = 0; i < maxFrames; i++) {
+                // Kamera bewegen
+                const cameraMoved = app.scene.updateCamera();
+
+                if (cameraMoved) {
+                    // ⭐ Kamera-Daten zur GPU schicken
+                    const newCameraData = app.scene.getCameraData();
+                    app.getBufferManager().updateCameraData(newCameraData);
+
+                    // ⭐ Cache ungültig machen!
+                    await app.resetCache();
+                }
+
+                // Frame rendern
+                await app.renderFrame();
+
+                // Kurze Pause für flüssige Animation
+                await new Promise(r => setTimeout(r, 16)); // ~60 FPS
+
+                // Progress alle 90 Frames
+                if (i % 90 === 0 && i > 0) {
+                    const stats = app.getPerformanceMonitor().getStats();
+                    console.log(`Frame ${i}/${maxFrames} | FPS: ${stats.fps.current.toFixed(1)} | Cache: ${stats.cache.hitRate.toFixed(0)}%`);
+                }
+
+                // Stoppen wenn Rotation deaktiviert wurde
+                if (!app.scene.isRotationActive()) {
+                    console.log(`\n⏹️ Render-Loop gestoppt bei Frame ${i}`);
+                    break;
+                }
+            }
+
+            const stats = app.getPerformanceMonitor().getStats();
+            console.log('\n' + '='.repeat(60));
+            console.log('📊 RENDER-LOOP ABGESCHLOSSEN:');
+            console.log('='.repeat(60));
+            console.log(`Ø FPS:                ${stats.fps.average.toFixed(1)}`);
+            console.log(`Ø Frame-Zeit:         ${stats.frameTime.average.toFixed(2)}ms`);
+            console.log(`Cache Hit Rate:       ${stats.cache.hitRate.toFixed(1)}%`);
+            console.log('='.repeat(60));
+        };
+
+        console.log('\n💡 Verfügbare Commands:');
+        console.log('   renderFrame()          - Einzelnen Frame rendern');
+        console.log('   togglePerf()           - Performance-Display ein/aus');
+        console.log('   quickSupersampling()   - 4x AA Test');
+        console.log('   resetCache()           - Cache leeren');
+        console.log('   benchmark(100)         - 100 Frames Benchmark');
+        console.log('\n🎬 Kamera-Animation (NEU!):');
+        console.log('   rotateCamera()         - Kamera-Rotation starten');
+        console.log('   stopCamera()           - Rotation stoppen');
+        console.log('   setSpeed(1.0)          - Geschwindigkeit ändern');
+        console.log('   renderLoop(360)        - 360 Frames mit Rotation\n');
 
     } catch (error) {
         logger.error('Fehler:', error);

@@ -31,8 +31,8 @@ export class BufferManager {
         canvasHeight: number,
         cameraData: Float32Array,
         sphereData: Float32Array,
-        lightPosition?: { x: number; y: number; z: number },  // ⭐ NEU
-        ambientIntensity?: number  // ⭐ NEU
+        lightPosition?: { x: number; y: number; z: number },
+        ambientIntensity?: number
     ): void {
         this.device = device;
         this.cameraData = cameraData;
@@ -40,12 +40,15 @@ export class BufferManager {
 
         this.logger.buffer('Erstelle GPU-Buffers...');
 
+        // Berechne tatsächliche Sphere Count aus Daten
+        const sphereCount = Math.floor(sphereData.length / 8);  // 8 floats per sphere
+
         this.createCameraBuffer();
         this.createSpheresBuffer();
-        this.createRenderInfoBuffer(canvasWidth, canvasHeight);
+        this.createRenderInfoBuffer(canvasWidth, canvasHeight, sphereCount);  // ← Übergebe Count
         this.createCacheBuffer(canvasWidth, canvasHeight);
         this.createAccumulationBuffer(canvasWidth, canvasHeight);
-        this.createSceneConfigBuffer(lightPosition, ambientIntensity);  // ⭐ Parameter übergeben
+        this.createSceneConfigBuffer(lightPosition, ambientIntensity);
 
         this.logger.success('Alle GPU-Buffers erfolgreich erstellt');
     }
@@ -104,7 +107,7 @@ export class BufferManager {
     /**
      * 📋 Render-Info-Buffer erstellen
      */
-    private createRenderInfoBuffer(width: number, height: number): void {
+    private createRenderInfoBuffer(width: number, height: number, sphereCount: number): void {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
         }
@@ -120,13 +123,13 @@ export class BufferManager {
         const renderInfoData = new Uint32Array([
             width,
             height,
-            0,
+            sphereCount,  // ← NEU: Tatsächliche Anzahl
             0
         ]);
 
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
 
-        this.logger.success(`Render-Info-Buffer erstellt: ${BUFFER_CONFIG.RENDER_INFO.SIZE} bytes`);
+        this.logger.success(`Render-Info-Buffer erstellt: ${sphereCount} Kugeln`);
     }
 
     /**
@@ -198,21 +201,20 @@ export class BufferManager {
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        // ⭐ Nutze Three.js Daten oder Fallback zu Constants
         const lightPos = lightPosition || SCENE_CONFIG.LIGHTING.POSITION;
         const ambient = ambientIntensity !== undefined ? ambientIntensity : SCENE_CONFIG.LIGHTING.AMBIENT;
 
         const sceneConfigData = new Float32Array([
             SCENE_CONFIG.GROUND.Y_POSITION,
             0, 0, 0,
-            lightPos.x,  // ⭐ Aus Three.js!
+            lightPos.x,
             lightPos.y,
             lightPos.z,
             SCENE_CONFIG.LIGHTING.SHADOW_ENABLED ? 1.0 : 0.0,
             SCENE_CONFIG.REFLECTIONS.ENABLED ? 1.0 : 0.0,
             SCENE_CONFIG.REFLECTIONS.MAX_BOUNCES,
             SCENE_CONFIG.REFLECTIONS.MIN_CONTRIBUTION,
-            ambient,  // ⭐ Aus Three.js!
+            ambient,
         ]);
 
         this.device.queue.writeBuffer(this.sceneConfigBuffer, 0, sceneConfigData);
@@ -228,15 +230,32 @@ export class BufferManager {
             throw new Error('Device oder Spheres-Buffer nicht verfügbar');
         }
 
-        // Hole Daten direkt aus Three.js Szene
         const spheresData = scene.getSpheresData();
-
         this.spheresData = spheresData;
 
         const bufferData = new Float32Array(spheresData);
         this.device.queue.writeBuffer(this.spheresBuffer, 0, bufferData);
 
         this.logger.buffer(`Spheres aus Scene aktualisiert (${scene.getSphereCount()} Kugeln)`);
+    }
+
+    /**
+     * 🔄 Render Info aktualisieren (z.B. bei geänderter Sphere Count)
+     */
+    public updateRenderInfo(width: number, height: number, sphereCount: number): void {
+        if (!this.device || !this.renderInfoBuffer) {
+            throw new Error('Device oder Render Info Buffer nicht verfügbar');
+        }
+
+        const renderInfoData = new Uint32Array([
+            width,
+            height,
+            sphereCount,
+            0
+        ]);
+
+        this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
+        this.logger.buffer(`Render Info aktualisiert: ${sphereCount} Kugeln`);
     }
 
     /**
@@ -282,7 +301,7 @@ export class BufferManager {
     }
 
     /**
-     * 🔄 Scene Config komplett aktualisieren (⭐ NEU)
+     * 🔄 Scene Config komplett aktualisieren
      */
     public updateSceneConfig(
         lightPosition?: { x: number; y: number; z: number },
@@ -294,7 +313,6 @@ export class BufferManager {
             throw new Error('Device oder Scene Config Buffer nicht verfügbar');
         }
 
-        // Aktuelle oder Default-Werte verwenden
         const lightPos = lightPosition || SCENE_CONFIG.LIGHTING.POSITION;
         const ambient = ambientIntensity !== undefined ? ambientIntensity : SCENE_CONFIG.LIGHTING.AMBIENT;
         const shadows = shadowEnabled !== undefined ? shadowEnabled : SCENE_CONFIG.LIGHTING.SHADOW_ENABLED;

@@ -1,5 +1,5 @@
 /**
- * 🔢 Constants - Zentrale Konfiguration
+ * 📢 Constants - Zentrale Konfiguration
  */
 
 // ===== CANVAS & RENDERING =====
@@ -49,7 +49,7 @@ export const BUFFER_CONFIG = {
         LABEL: 'Sphere Buffer',
     },
     SPHERES: {
-        MAX_COUNT: 20,  // ← Erhöht von 10 auf 20!
+        MAX_COUNT: 1000,  // ← ERHÖHT von 20 auf 1000!
         BYTES_PER_SPHERE: 48,
         get SIZE() {
             return this.MAX_COUNT * this.BYTES_PER_SPHERE;
@@ -102,8 +102,6 @@ export const CACHE_CONFIG = {
 } as const;
 
 // ===== SCENE KONFIGURATION =====
-// HINWEIS: Spheres werden jetzt aus Three.js geladen!
-// Die SPHERES-Config wird nicht mehr verwendet.
 export const SCENE_CONFIG = {
     CAMERA: {
         FOV: 60,

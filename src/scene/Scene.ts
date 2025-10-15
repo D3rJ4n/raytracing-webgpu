@@ -15,24 +15,23 @@ export interface RaytracerLight {
 }
 
 /**
- * 🌍 Scene - Three.js Szenen-Management mit Dynamic Content
- * 
- * Verwaltet:
- * - Three.js Szene, Kamera, Objekte
- * - Dynamisches Hinzufügen/Entfernen von Objekten
- * - Extraktion von Daten für Raytracer
+ * 🌍 Scene - Three.js Szenen-Management mit 200 Kugeln in Rechteck-Anordnung
  */
 export class Scene {
     private scene!: THREE.Scene;
     private camera!: THREE.PerspectiveCamera;
     private logger: Logger;
 
-    // Three.js Objekte
     private meshes: THREE.Mesh[] = [];
     private lights: THREE.Light[] = [];
-
-    // Ambient Light Stärke
     private ambientLightIntensity: number = 0.2;
+
+    // ===== KAMERA-ANIMATION =====
+    private isRotating: boolean = false;
+    private rotationAngle: number = 0;
+    private rotationSpeed: number = 0.5; // Grad pro Frame
+    private rotationRadius: number = 20; // Abstand zur Mitte
+    private cameraHeight: number = 10;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -46,7 +45,7 @@ export class Scene {
 
         this.createScene();
         this.createCamera();
-        this.setupDefaultScene();
+        this.setupRectangleScene();
 
         this.logSceneInfo();
         this.logger.success('Three.js Szene erstellt');
@@ -57,7 +56,7 @@ export class Scene {
      */
     private createScene(): void {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87ceeb); // Himmelblau
+        this.scene.background = new THREE.Color(0x87ceeb);
         this.logger.init('Leere Three.js Szene erstellt');
     }
 
@@ -66,187 +65,92 @@ export class Scene {
      */
     private createCamera(): void {
         this.camera = new THREE.PerspectiveCamera(
-            60,   // FOV
-            1.0,  // Aspect (wird später gesetzt)
-            0.1,  // Near
-            100   // Far
+            60,
+            1.0,
+            0.1,
+            100
         );
 
-        this.camera.position.set(0, 0, 7);
+        this.camera.position.set(0, this.cameraHeight, this.rotationRadius);
         this.camera.lookAt(0, 0, 0);
 
-        this.logger.init('Kamera erstellt: FOV=60°, Position=(0, 0, 5)');
+        this.logger.init(`Kamera erstellt: FOV=60°, Position=(0, ${this.cameraHeight}, ${this.rotationRadius})`);
     }
 
     /**
-     * 🎨 Standard-Szene aufbauen
+     * 📐 Rechteck-Szene mit 200 Kugeln aufbauen
      */
-    private setupDefaultScene(): void {
-        this.logger.init('Baue Standard-Szene auf...');
+    private setupRectangleScene(): void {
+        this.logger.init('Baue Rechteck-Szene mit 200 Kugeln auf...');
 
-        // ═══════════════════════════════════════════════════════════
-        // HAUPTKUGEL (Blau, Metallisch)
-        // ═══════════════════════════════════════════════════════════
-        const mainSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(1.0, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0x3380ff,      // Blau
-                metalness: 0.98,      // Sehr metallisch
-                roughness: 0.02       // Glatt
-            })
-        );
-        mainSphere.position.set(0, 1, 0);
-        mainSphere.name = 'Main Sphere';
-        this.scene.add(mainSphere);
-        this.meshes.push(mainSphere);
+        this.clearSpheres();
 
-        // ═══════════════════════════════════════════════════════════
-        // KLEINE KUGELN (Verschiedene Farben)
-        // ═══════════════════════════════════════════════════════════
+        const rows = 2;
+        const cols = 2;
+        const spacing = 1.2;
+        const baseRadius = 0.4;
+        const heightAboveGround = 0.5;
 
-        // Rote Kugel (links)
-        const redSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.7, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0xff0000,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        redSphere.position.set(-2.5, 0, -1);
-        redSphere.name = 'Red Sphere';
-        this.scene.add(redSphere);
-        this.meshes.push(redSphere);
+        const offsetX = (cols - 1) * spacing / 2;
+        const offsetZ = (rows - 1) * spacing / 2;
 
-        // Orange Kugel (hinten oben)
-        const orangeSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.7, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0xff6600,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        orangeSphere.position.set(0, 4, 3);
-        orangeSphere.name = 'Orange Sphere';
-        this.scene.add(orangeSphere);
-        this.meshes.push(orangeSphere);
+        let sphereCount = 0;
 
-        // Grüne Kugel (rechts)
-        const greenSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.7, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0x00ff00,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        greenSphere.position.set(2.5, 0, -1);
-        greenSphere.name = 'Green Sphere';
-        this.scene.add(greenSphere);
-        this.meshes.push(greenSphere);
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const position = {
+                    x: col * spacing - offsetX,
+                    y: heightAboveGround,
+                    z: row * spacing - offsetZ
+                };
 
-        // Gelbe Kugel (vorne)
-        const yellowSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.5, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0xffff00,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        yellowSphere.position.set(0, -0.3, 2);
-        yellowSphere.name = 'Yellow Sphere';
-        this.scene.add(yellowSphere);
-        this.meshes.push(yellowSphere);
+                const color = this.getRectangleColor(col, row, cols, rows);
+                const metallic = (col % 3 === 0) ? 0.8 : 0.1;
 
-        // Magenta Kugel
-        const magentaSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.4, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0xff00ff,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        magentaSphere.position.set(-1.5, 0.5, 1.5);
-        magentaSphere.name = 'Magenta Sphere';
-        this.scene.add(magentaSphere);
-        this.meshes.push(magentaSphere);
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(baseRadius, 16, 16),
+                    new THREE.MeshStandardMaterial({
+                        color,
+                        metalness: metallic,
+                        roughness: 0.3
+                    })
+                );
 
-        // Cyan Kugel
-        const cyanSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.4, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0x00ffff,
-                metalness: 0.5,
-                roughness: 0.5
-            })
-        );
-        cyanSphere.position.set(1.5, 0.5, 1.5);
-        cyanSphere.name = 'Cyan Sphere';
-        this.scene.add(cyanSphere);
-        this.meshes.push(cyanSphere);
+                sphere.position.set(position.x, position.y, position.z);
+                sphere.name = `Sphere_${row}_${col}`;
 
-        // Weiße Kugel
-        const whiteSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.6, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        whiteSphere.position.set(-1.0, 1.5, -2.0);
-        whiteSphere.name = 'White Sphere';
-        this.scene.add(whiteSphere);
-        this.meshes.push(whiteSphere);
+                this.scene.add(sphere);
+                this.meshes.push(sphere);
 
-        // Olivgrüne Kugel
-        const oliveSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.6, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0x808000,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        oliveSphere.position.set(1.0, 1.5, -2.0);
-        oliveSphere.name = 'Olive Sphere';
-        this.scene.add(oliveSphere);
-        this.meshes.push(oliveSphere);
-
-        // Rosa Kugel
-        const pinkSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.3, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color: 0xff8080,
-                metalness: 0.0,
-                roughness: 1.0
-            })
-        );
-        pinkSphere.position.set(0, 0.3, -3.0);
-        pinkSphere.name = 'Pink Sphere';
-        this.scene.add(pinkSphere);
-        this.meshes.push(pinkSphere);
-
-        // ═══════════════════════════════════════════════════════════
-        // LICHTQUELLEN
-        // ═══════════════════════════════════════════════════════════
+                sphereCount++;
+            }
+        }
 
         const pointLight = new THREE.PointLight(0xffffff, 1.0);
-        pointLight.position.set(5, 5, 5);
+        pointLight.position.set(10, 10, 10);
         pointLight.name = 'Main Light';
         this.scene.add(pointLight);
         this.lights.push(pointLight);
 
-        // Ambient Light für Grundhelligkeit
         const ambientLight = new THREE.AmbientLight(0xffffff, this.ambientLightIntensity);
         ambientLight.name = 'Ambient Light';
         this.scene.add(ambientLight);
         this.lights.push(ambientLight);
 
-        this.logger.success(`Szene aufgebaut: ${this.meshes.length} Meshes, ${this.lights.length} Lights`);
+        this.logger.success(`Rechteck-Szene aufgebaut: ${sphereCount} Kugeln (${cols}x${rows}), ${this.lights.length} Lights`);
+    }
+
+    /**
+     * 🎨 Farbe für Rechteck-Position berechnen
+     */
+    private getRectangleColor(col: number, row: number, totalCols: number, totalRows: number): number {
+        const t = (col / totalCols + row / totalRows) / 2;
+
+        const r = Math.floor(Math.sin(t * Math.PI) * 127 + 128);
+        const g = Math.floor(Math.sin(t * Math.PI + 2) * 127 + 128);
+        const b = Math.floor(Math.sin(t * Math.PI + 4) * 127 + 128);
+
+        return (r << 16) | (g << 8) | b;
     }
 
     /**
@@ -275,83 +179,137 @@ export class Scene {
         this.scene.add(sphere);
         this.meshes.push(sphere);
 
-        this.logger.info(`Kugel hinzugefügt: ${sphere.name} (r=${radius})`);
-
         return sphere;
     }
 
     /**
-     * 💡 Lichtquelle hinzufügen
+     * 🔲 Generiere ein neues Grid
      */
-    public addLight(
-        position: { x: number; y: number; z: number },
-        color: number = 0xffffff,
-        intensity: number = 1.0
-    ): THREE.PointLight {
-        const light = new THREE.PointLight(color, intensity);
-        light.position.set(position.x, position.y, position.z);
-        light.name = `Light ${this.lights.length}`;
+    public generateSphereGrid(
+        gridSize: number,
+        spacing: number = 3.0,
+        baseRadius: number = 0.3
+    ): void {
+        this.logger.info(`Generiere ${gridSize}³ = ${gridSize * gridSize * gridSize} Kugeln Grid...`);
 
-        this.scene.add(light);
-        this.lights.push(light);
+        this.clearSpheres();
 
-        this.logger.info(`Licht hinzugefügt: (${position.x}, ${position.y}, ${position.z})`);
+        const offset = (gridSize - 1) * spacing / 2;
 
-        return light;
+        for (let x = 0; x < gridSize; x++) {
+            for (let y = 0; y < gridSize; y++) {
+                for (let z = 0; z < gridSize; z++) {
+                    const position = {
+                        x: x * spacing - offset,
+                        y: y * spacing - offset,
+                        z: z * spacing - offset
+                    };
+
+                    const radius = baseRadius + (x + y + z) * 0.01;
+                    const color = this.getGridColor(
+                        x, y, z,
+                        { x: gridSize, y: gridSize, z: gridSize }
+                    );
+                    const metallic = (x % 2 === 0 && y % 2 === 0) ? 0.9 : 0.1;
+
+                    this.addSphere(
+                        position,
+                        radius,
+                        color,
+                        metallic,
+                        0.2,
+                        `Grid_${x}_${y}_${z}`
+                    );
+                }
+            }
+        }
+
+        this.logger.success(`Grid erstellt: ${this.meshes.length} Kugeln`);
+    }
+
+    /**
+     * 🎨 Farbe für Grid-Position berechnen
+     */
+    private getGridColor(x: number, y: number, z: number, gridSize: { x: number; y: number; z: number }): number {
+        const r = Math.floor((x / gridSize.x) * 255);
+        const g = Math.floor((y / gridSize.y) * 255);
+        const b = Math.floor((z / gridSize.z) * 255);
+
+        return (r << 16) | (g << 8) | b;
+    }
+
+    /**
+     * 🔲 Generiere Wand aus Kugeln
+     */
+    public generateSphereWall(width: number, height: number): void {
+        this.logger.info(`Generiere ${width}x${height} = ${width * height} Kugeln Wand...`);
+
+        this.clearSpheres();
+
+        const spacing = 1.5;
+        const baseRadius = 0.4;
+        const offsetX = (width - 1) * spacing / 2;
+        const offsetY = (height - 1) * spacing / 2;
+
+        for (let x = 0; x < width; x++) {
+            for (let y = 0; y < height; y++) {
+                const position = {
+                    x: x * spacing - offsetX,
+                    y: y * spacing - offsetY,
+                    z: 0
+                };
+
+                const color = this.getRectangleColor(x, y, width, height);
+                const metallic = (x % 2 === 0 && y % 2 === 0) ? 0.8 : 0.1;
+
+                this.addSphere(
+                    position,
+                    baseRadius,
+                    color,
+                    metallic,
+                    0.3,
+                    `Wall_${x}_${y}`
+                );
+            }
+        }
+
+        this.logger.success(`Wand erstellt: ${this.meshes.length} Kugeln`);
     }
 
     /**
      * 🔄 Kugeln für Raytracer extrahieren
      */
     public getSpheresData(): Float32Array {
-        this.logger.debug(`Extrahiere ${this.meshes.length} Kugeln für Raytracer...`);
-
-        const maxSpheres = 20;
-        const floatsPerSphere = 8; // center(3) + radius(1) + color(3) + metallic(1)
+        const maxSpheres = 1000;
+        const floatsPerSphere = 8;
         const data = new Float32Array(maxSpheres * floatsPerSphere);
 
         this.meshes.forEach((mesh, index) => {
-            if (index >= maxSpheres) {
-                this.logger.warning(`Zu viele Kugeln! Maximum: ${maxSpheres}`);
-                return;
-            }
+            if (index >= maxSpheres) return;
 
             const geometry = mesh.geometry as THREE.SphereGeometry;
             const material = mesh.material as THREE.MeshStandardMaterial;
 
-            // Radius aus Geometrie (berücksichtige Scale)
             const radius = geometry.parameters.radius * Math.max(
                 mesh.scale.x,
                 mesh.scale.y,
                 mesh.scale.z
             );
 
-            // Farbe aus Material
             const color = material.color;
-
-            // Metalness aus Material
             const metallic = material.metalness;
-
-            // Position im Array
             const offset = index * floatsPerSphere;
 
-            // Center (xyz) - Weltposition
             const worldPos = new THREE.Vector3();
             mesh.getWorldPosition(worldPos);
 
             data[offset + 0] = worldPos.x;
             data[offset + 1] = worldPos.y;
             data[offset + 2] = worldPos.z;
-
-            // Radius
             data[offset + 3] = radius;
-
-            // Color (rgb)
             data[offset + 4] = color.r;
             data[offset + 5] = color.g;
             data[offset + 6] = color.b;
-
-            // Metallic
             data[offset + 7] = metallic;
         });
 
@@ -359,75 +317,16 @@ export class Scene {
     }
 
     /**
-     * 💡 Lichtquellen für Raytracer extrahieren
-     */
-    public getLightData(): RaytracerLight[] {
-        return this.lights.map(light => {
-            if (light instanceof THREE.PointLight) {
-                const color = light.color;
-                const worldPos = new THREE.Vector3();
-                light.getWorldPosition(worldPos);
-
-                return {
-                    position: {
-                        x: worldPos.x,
-                        y: worldPos.y,
-                        z: worldPos.z
-                    },
-                    color: {
-                        r: color.r,
-                        g: color.g,
-                        b: color.b
-                    },
-                    intensity: light.intensity
-                };
-            }
-
-            // Fallback für andere Licht-Typen
-            return {
-                position: { x: 5, y: 5, z: 5 },
-                color: { r: 1, g: 1, b: 1 },
-                intensity: 1.0
-            };
-        });
-    }
-
-    // ⭐ NEU: Primary Light für GPU-Buffer
-    /**
-     * 💡 Primäres Licht abrufen (erstes PointLight)
-     */
-    public getPrimaryLight(): THREE.PointLight | null {
-        const pointLight = this.lights.find(l => l instanceof THREE.PointLight);
-        return pointLight as THREE.PointLight || null;
-    }
-
-    /**
      * 💡 Primary Light Position für GPU
      */
     public getPrimaryLightPosition(): { x: number; y: number; z: number } {
-        const light = this.getPrimaryLight();
+        const light = this.lights.find(l => l instanceof THREE.PointLight) as THREE.PointLight;
         if (light) {
             const worldPos = new THREE.Vector3();
             light.getWorldPosition(worldPos);
             return { x: worldPos.x, y: worldPos.y, z: worldPos.z };
         }
-        // Fallback
-        return { x: 5, y: 5, z: 5 };
-    }
-
-    // ⭐ NEU: Ambient Light Kontrolle
-    /**
-     * 💡 Ambient Light Stärke setzen
-     */
-    public setAmbientIntensity(intensity: number): void {
-        this.ambientLightIntensity = Math.max(0, Math.min(1, intensity));
-
-        const ambientLight = this.lights.find(l => l instanceof THREE.AmbientLight);
-        if (ambientLight) {
-            (ambientLight as THREE.AmbientLight).intensity = this.ambientLightIntensity;
-        }
-
-        this.logger.info(`Ambient Light Intensity: ${this.ambientLightIntensity.toFixed(2)}`);
+        return { x: 10, y: 10, z: 10 };
     }
 
     /**
@@ -445,37 +344,6 @@ export class Scene {
     }
 
     /**
-     * 📦 Alle Meshes abrufen
-     */
-    public getAllMeshes(): THREE.Mesh[] {
-        return [...this.meshes]; // Kopie zurückgeben
-    }
-
-    /**
-     * 💡 Alle Lichter abrufen
-     */
-    public getAllLights(): THREE.Light[] {
-        return [...this.lights]; // Kopie zurückgeben
-    }
-
-    /**
-     * 🗑️ Objekt aus Szene entfernen
-     */
-    public removeSphere(mesh: THREE.Mesh): void {
-        const index = this.meshes.indexOf(mesh);
-        if (index > -1) {
-            this.meshes.splice(index, 1);
-            this.scene.remove(mesh);
-            mesh.geometry.dispose();
-            (mesh.material as THREE.Material).dispose();
-
-            this.logger.info(`Kugel entfernt: ${mesh.name}`);
-        } else {
-            this.logger.warning('Kugel nicht in Szene gefunden');
-        }
-    }
-
-    /**
      * 🧹 Alle Kugeln entfernen
      */
     public clearSpheres(): void {
@@ -485,26 +353,6 @@ export class Scene {
             (mesh.material as THREE.Material).dispose();
         });
         this.meshes = [];
-
-        this.logger.info('Alle Kugeln entfernt');
-    }
-
-    /**
-     * 🎨 Material einer Kugel ändern
-     */
-    public setSphereColor(mesh: THREE.Mesh, color: number): void {
-        const material = mesh.material as THREE.MeshStandardMaterial;
-        material.color.set(color);
-        this.logger.info(`Farbe geändert: ${mesh.name} → #${color.toString(16)}`);
-    }
-
-    /**
-     * 🪞 Metalness einer Kugel ändern
-     */
-    public setSphereMetalness(mesh: THREE.Mesh, metalness: number): void {
-        const material = mesh.material as THREE.MeshStandardMaterial;
-        material.metalness = Math.max(0, Math.min(1, metalness));
-        this.logger.info(`Metalness geändert: ${mesh.name} → ${material.metalness}`);
     }
 
     /**
@@ -513,7 +361,6 @@ export class Scene {
     public updateCameraAspect(width: number, height: number): void {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        this.logger.debug(`Kamera-Aspect aktualisiert: ${this.camera.aspect.toFixed(3)}`);
     }
 
     /**
@@ -525,17 +372,69 @@ export class Scene {
         lookAtTarget.add(this.camera.position);
 
         return new Float32Array([
-            // Position (xyz) + Padding
             this.camera.position.x,
             this.camera.position.y,
             this.camera.position.z,
             0,
-            // LookAt (xyz) + Padding
             lookAtTarget.x,
             lookAtTarget.y,
             lookAtTarget.z,
             0
         ]);
+    }
+
+    /**
+     * 🎬 Kamera-Rotation starten
+     */
+    public startCameraRotation(): void {
+        this.isRotating = true;
+        this.logger.info('🎬 Kamera-Rotation gestartet');
+    }
+
+    /**
+     * ⏸️ Kamera-Rotation stoppen
+     */
+    public stopCameraRotation(): void {
+        this.isRotating = false;
+        this.logger.info('⏸️ Kamera-Rotation gestoppt');
+    }
+
+    /**
+     * 🔄 Kamera-Position aktualisieren (einmal pro Frame aufrufen)
+     */
+    public updateCamera(): boolean {
+        if (!this.isRotating) {
+            return false;
+        }
+
+        this.rotationAngle += this.rotationSpeed;
+        if (this.rotationAngle >= 360) {
+            this.rotationAngle -= 360;
+        }
+
+        const angleInRadians = (this.rotationAngle * Math.PI) / 180;
+        const x = Math.sin(angleInRadians) * this.rotationRadius;
+        const z = Math.cos(angleInRadians) * this.rotationRadius;
+
+        this.camera.position.set(x, this.cameraHeight, z);
+        this.camera.lookAt(0, 0, 0);
+
+        return true;
+    }
+
+    /**
+     * 🎥 Rotation-Status abrufen
+     */
+    public isRotationActive(): boolean {
+        return this.isRotating;
+    }
+
+    /**
+     * ⚙️ Rotations-Geschwindigkeit ändern
+     */
+    public setRotationSpeed(speed: number): void {
+        this.rotationSpeed = speed;
+        this.logger.info(`Rotations-Geschwindigkeit: ${speed}°/Frame`);
     }
 
     /**
@@ -553,7 +452,7 @@ export class Scene {
     }
 
     /**
-     * 📝 Szenen-Informationen loggen
+     * 📋 Szenen-Informationen loggen
      */
     private logSceneInfo(): void {
         this.logger.info('=== SZENEN-INFORMATION ===');
@@ -564,32 +463,14 @@ export class Scene {
     }
 
     /**
-     * 🎯 Kamera bewegen
-     */
-    public moveCamera(x: number, y: number, z: number): void {
-        this.camera.position.set(x, y, z);
-        this.logger.info(`Kamera bewegt zu: (${x}, ${y}, ${z})`);
-    }
-
-    /**
-     * 🎯 Kamera drehen (lookAt)
-     */
-    public setCameraLookAt(x: number, y: number, z: number): void {
-        this.camera.lookAt(x, y, z);
-        this.logger.info(`Kamera schaut auf: (${x}, ${y}, ${z})`);
-    }
-
-    /**
      * 🧹 Ressourcen aufräumen
      */
     public cleanup(): void {
-        // Alle Meshes aufräumen
         this.meshes.forEach(mesh => {
             mesh.geometry.dispose();
             (mesh.material as THREE.Material).dispose();
         });
 
-        // Szene leeren
         this.scene.clear();
 
         this.meshes = [];

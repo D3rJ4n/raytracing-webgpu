@@ -9,20 +9,15 @@ import { PixelCache } from '../cache/PixelCache';
 import { CacheDebugger } from '../cache/CacheDebugger';
 import { StatusDisplay } from '../utils/StatusDisplay';
 import { Logger } from '../utils/Logger';
+import { PerformanceMonitor } from '../utils/PerformanceMonitor';
 import { CANVAS_CONFIG, STATUS_CONFIG } from '../utils/Constants';
-import * as THREE from 'three';
 
-/**
- * 🎯 WebGPURaytracerApp - Haupt-App mit Three.js Scene Integration
- */
 export class WebGPURaytracerApp {
-    // ===== DOM-ELEMENTE =====
     private canvas: HTMLCanvasElement;
     private statusDisplay: StatusDisplay;
 
-    // ===== SUBSYSTEME =====
     private webgpuDevice: WebGPUDevice;
-    public scene: Scene;  // public für direkten Zugriff in Scene.ts
+    public scene: Scene;
     private bufferManager: BufferManager;
     private textureManager: TextureManager;
     private computePipeline: ComputePipeline;
@@ -30,16 +25,13 @@ export class WebGPURaytracerApp {
     private renderer: Renderer;
     private pixelCache: PixelCache;
     private cacheDebugger: CacheDebugger;
+    private performanceMonitor: PerformanceMonitor;
 
-    // ===== SUPERSAMPLING STATE =====
     private currentSample: number = 0;
     private maxSamples: number = 0;
     private isAccumulating: boolean = false;
 
-    // ===== UTILITIES =====
     private logger: Logger;
-
-    // ===== STATE =====
     private initialized: boolean = false;
 
     constructor() {
@@ -52,6 +44,8 @@ export class WebGPURaytracerApp {
         }
 
         this.statusDisplay = new StatusDisplay(STATUS_CONFIG.ELEMENT_ID);
+        this.performanceMonitor = new PerformanceMonitor();
+
         this.logger.init(`Canvas gefunden: ${this.canvas.width}x${this.canvas.height}`);
 
         this.webgpuDevice = new WebGPUDevice();
@@ -65,9 +59,6 @@ export class WebGPURaytracerApp {
         this.cacheDebugger = new CacheDebugger();
     }
 
-    /**
-     * 🚀 App vollständig initialisieren
-     */
     public async initialize(): Promise<void> {
         if (this.initialized) {
             this.logger.warning('App bereits initialisiert');
@@ -77,16 +68,13 @@ export class WebGPURaytracerApp {
         try {
             this.statusDisplay.showInfo('WebGPU Raytracer wird initialisiert...');
 
-            // 1. WebGPU initialisieren
             this.logger.init('Initialisiere WebGPU...');
             await this.webgpuDevice.initialize(this.canvas);
 
-            // 2. Szene erstellen
             this.logger.init('Erstelle Three.js Szene...');
             this.scene.initialize();
             this.scene.updateCameraAspect(this.canvas.width, this.canvas.height);
 
-            // 3. GPU-Ressourcen erstellen
             this.logger.init('Erstelle GPU-Ressourcen...');
 
             this.textureManager.initialize(
@@ -95,7 +83,6 @@ export class WebGPURaytracerApp {
                 this.canvas.height
             );
 
-            // ⭐ Three.js Daten für Buffer holen
             const lightPosition = this.scene.getPrimaryLightPosition();
             const ambientIntensity = this.scene.getAmbientIntensity();
 
@@ -109,7 +96,6 @@ export class WebGPURaytracerApp {
                 ambientIntensity
             );
 
-            // 4. Cache-System initialisieren
             this.pixelCache.initialize(
                 this.webgpuDevice.getDevice(),
                 this.canvas.width,
@@ -124,7 +110,6 @@ export class WebGPURaytracerApp {
                 this.canvas.height
             );
 
-            // 5. Pipelines erstellen
             this.logger.init('Erstelle Rendering-Pipelines...');
 
             await this.computePipeline.initialize(
@@ -139,7 +124,6 @@ export class WebGPURaytracerApp {
                 this.textureManager.getSampler()
             );
 
-            // 6. Renderer initialisieren
             this.logger.init('Initialisiere Renderer...');
             this.renderer.initialize(
                 this.webgpuDevice.getDevice(),
@@ -150,11 +134,12 @@ export class WebGPURaytracerApp {
                 this.renderPipeline.getBindGroup()
             );
 
-            // 7. Ersten Frame rendern
-            this.logger.init('Rendere ersten Frame...');
-            await this.renderer.renderFrame(this.canvas);
+            this.performanceMonitor.initialize();
 
             this.initialized = true;
+            this.logger.init('Rendere ersten Frame...');
+            await this.renderFrame();
+
             this.statusDisplay.showSuccess('✅ WebGPU Raytracer mit Three.js läuft!');
             this.logger.success('Initialisierung erfolgreich abgeschlossen');
 
@@ -165,9 +150,81 @@ export class WebGPURaytracerApp {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CACHE & RENDERING METHODEN
-    // ═══════════════════════════════════════════════════════════════════════════
+    /**
+     * 🎬 Einzelnen Frame rendern (mit Performance-Tracking)
+     */
+    public async renderFrame(): Promise<void> {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        const startTime = performance.now();
+        await this.renderer.renderFrame(this.canvas);
+
+        // ⭐ WICHTIG: Warten bis GPU fertig ist!
+        await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
+
+        const frameTime = performance.now() - startTime;
+
+        this.performanceMonitor.recordFrameTime(frameTime);
+
+        // Jetzt Cache-Statistiken lesen (GPU ist jetzt fertig!)
+        await this.pixelCache.readStatistics();
+        const cacheStats = this.pixelCache.getStatistics();
+        this.performanceMonitor.recordCacheStats(cacheStats);
+    }
+
+    /**
+     * 🔲 Sphere Grid für Performance-Tests erstellen
+     */
+    public createSphereGrid(gridSize: number): void {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        this.logger.info(`Erstelle ${gridSize}³ Kugel-Grid...`);
+
+        this.scene.generateSphereGrid(gridSize);
+        this.bufferManager.updateSpheresFromScene(this.scene);
+
+        const sphereCount = this.scene.getSphereCount();
+        this.bufferManager.updateRenderInfo(
+            this.canvas.width,
+            this.canvas.height,
+            sphereCount
+        );
+
+        this.resetCache();
+        this.performanceMonitor.reset();
+
+        this.logger.success(`Grid erstellt: ${sphereCount} Kugeln`);
+    }
+
+    /**
+     * 🔲 Sphere Wall für Performance-Tests
+     */
+    public createSphereWall(width: number, height: number): void {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        this.logger.info(`Erstelle ${width}x${height} Kugel-Wand...`);
+
+        this.scene.generateSphereWall(width, height);
+        this.bufferManager.updateSpheresFromScene(this.scene);
+
+        const sphereCount = this.scene.getSphereCount();
+        this.bufferManager.updateRenderInfo(
+            this.canvas.width,
+            this.canvas.height,
+            sphereCount
+        );
+
+        this.resetCache();
+        this.performanceMonitor.reset();
+
+        this.logger.success(`Wand erstellt: ${sphereCount} Kugeln`);
+    }
 
     /**
      * 🧪 Cache-Debug-Test starten
@@ -195,26 +252,49 @@ export class WebGPURaytracerApp {
     }
 
     /**
+     * 📊 Performance-Statistiken anzeigen
+     */
+    public showPerformanceStats(): void {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        this.performanceMonitor.logDetailedStats();
+
+        const rating = this.performanceMonitor.getPerformanceRating();
+        console.log(`\n${rating.message}\n`);
+    }
+
+    /**
+     * 👁️ Performance-Display umschalten
+     */
+    public togglePerformanceDisplay(visible?: boolean): void {
+        if (!this.initialized) {
+            throw new Error('App nicht initialisiert');
+        }
+
+        if (visible === undefined) {
+            const stats = this.performanceMonitor.getStats();
+            visible = stats.fps.current === 0;
+        }
+
+        this.performanceMonitor.toggleDisplay(visible);
+    }
+
+    /**
      * 🔄 Cache zurücksetzen
      */
-    public resetCache(): void {
+    public async resetCache(): Promise<void> {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
         }
 
         this.pixelCache.reset();
+
+        // ⭐ WICHTIG: Warten bis GPU den Cache wirklich gelöscht hat!
+        await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
+
         this.logger.info('Cache zurückgesetzt');
-    }
-
-    /**
-     * 🎬 Einzelnen Frame rendern
-     */
-    public async renderFrame(): Promise<void> {
-        if (!this.initialized) {
-            throw new Error('App nicht initialisiert');
-        }
-
-        await this.renderer.renderFrame(this.canvas);
     }
 
     /**
@@ -240,7 +320,7 @@ export class WebGPURaytracerApp {
             const baseCameraData = this.scene.getCameraData();
             this.bufferManager.updateCameraDataWithRandomSeeds(baseCameraData, sample);
 
-            await this.renderer.renderFrame(this.canvas);
+            await this.renderFrame();
 
             if (sample % 4 === 0 || sample === maxSamples - 1) {
                 const progress = ((sample + 1) / maxSamples * 100).toFixed(0);
@@ -285,6 +365,20 @@ export class WebGPURaytracerApp {
     }
 
     /**
+     * 📊 Performance Monitor abrufen
+     */
+    public getPerformanceMonitor(): PerformanceMonitor {
+        return this.performanceMonitor;
+    }
+
+    /**
+     * 🔄 Buffer Manager für direkten Zugriff (für main.ts)
+     */
+    public getBufferManager(): BufferManager {
+        return this.bufferManager;
+    }
+
+    /**
      * 📊 App-Status abrufen
      */
     public getStatus(): {
@@ -320,6 +414,10 @@ export class WebGPURaytracerApp {
 
         if (this.scene) {
             this.scene.cleanup();
+        }
+
+        if (this.performanceMonitor) {
+            this.performanceMonitor.cleanup();
         }
 
         this.initialized = false;
