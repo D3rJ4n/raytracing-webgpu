@@ -15,7 +15,7 @@ export interface RaytracerLight {
 }
 
 /**
- * 🌍 Scene - Three.js Szenen-Management mit 200 Kugeln in Rechteck-Anordnung
+ * Scene - Three.js Szenen-Management mit Bewegungs-Tracking
  */
 export class Scene {
     private scene!: THREE.Scene;
@@ -26,20 +26,21 @@ export class Scene {
     private lights: THREE.Light[] = [];
     private ambientLightIntensity: number = 0.2;
 
-    // ===== KAMERA-ANIMATION =====
+    // Bewegungs-Tracking
+    private lastSpherePositions: Map<number, THREE.Vector3> = new Map();
+    private movedSpheres: Set<number> = new Set();
+
+    // Kamera-Animation
     private isRotating: boolean = false;
     private rotationAngle: number = 0;
-    private rotationSpeed: number = 0.5; // Grad pro Frame
-    private rotationRadius: number = 20; // Abstand zur Mitte
+    private rotationSpeed: number = 0.5;
+    private rotationRadius: number = 20;
     private cameraHeight: number = 10;
 
     constructor() {
         this.logger = Logger.getInstance();
     }
 
-    /**
-     * 🚀 Szene initialisieren
-     */
     public initialize(): void {
         this.logger.init('Erstelle Three.js Szene...');
 
@@ -51,42 +52,26 @@ export class Scene {
         this.logger.success('Three.js Szene erstellt');
     }
 
-    /**
-     * 🌍 Leere Szene erstellen
-     */
     private createScene(): void {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87ceeb);
         this.logger.init('Leere Three.js Szene erstellt');
     }
 
-    /**
-     * 📷 Perspektiv-Kamera erstellen
-     */
     private createCamera(): void {
-        this.camera = new THREE.PerspectiveCamera(
-            60,
-            1.0,
-            0.1,
-            100
-        );
-
+        this.camera = new THREE.PerspectiveCamera(60, 1.0, 0.1, 100);
         this.camera.position.set(0, this.cameraHeight, this.rotationRadius);
         this.camera.lookAt(0, 0, 0);
-
         this.logger.init(`Kamera erstellt: FOV=60°, Position=(0, ${this.cameraHeight}, ${this.rotationRadius})`);
     }
 
-    /**
-     * 📐 Rechteck-Szene mit 200 Kugeln aufbauen
-     */
     private setupRectangleScene(): void {
         this.logger.init('Baue Rechteck-Szene mit 200 Kugeln auf...');
 
         this.clearSpheres();
 
-        const rows = 2;
-        const cols = 2;
+        const rows = 25;
+        const cols = 25;
         const spacing = 1.2;
         const baseRadius = 0.4;
         const heightAboveGround = 0.5;
@@ -122,6 +107,9 @@ export class Scene {
                 this.scene.add(sphere);
                 this.meshes.push(sphere);
 
+                // Initiale Position speichern
+                this.lastSpherePositions.set(sphereCount, sphere.position.clone());
+
                 sphereCount++;
             }
         }
@@ -140,22 +128,55 @@ export class Scene {
         this.logger.success(`Rechteck-Szene aufgebaut: ${sphereCount} Kugeln (${cols}x${rows}), ${this.lights.length} Lights`);
     }
 
-    /**
-     * 🎨 Farbe für Rechteck-Position berechnen
-     */
+    // Bewegungs-Tracking Methoden
+    public trackMovements(): number[] {
+        const moved: number[] = [];
+
+        this.meshes.forEach((mesh, index) => {
+            const currentPos = mesh.position.clone();
+            const lastPos = this.lastSpherePositions.get(index);
+
+            if (!lastPos || !currentPos.equals(lastPos)) {
+                moved.push(index);
+                this.lastSpherePositions.set(index, currentPos.clone());
+                this.movedSpheres.add(index);
+            }
+        });
+
+        if (moved.length > 0) {
+            this.logger.info(`Bewegung erkannt: ${moved.length} Objekte (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? '...' : ''})`);
+        }
+
+        return moved;
+    }
+
+    public getMovedSpheresCount(): number {
+        return this.movedSpheres.size;
+    }
+
+    public clearMovementTracking(): void {
+        this.movedSpheres.clear();
+        this.logger.info('Bewegungs-Tracking zurückgesetzt');
+    }
+
+    public getMovementInfo(): {
+        totalMoved: number;
+        currentlyTracked: number;
+    } {
+        return {
+            totalMoved: this.movedSpheres.size,
+            currentlyTracked: this.lastSpherePositions.size
+        };
+    }
+
     private getRectangleColor(col: number, row: number, totalCols: number, totalRows: number): number {
         const t = (col / totalCols + row / totalRows) / 2;
-
         const r = Math.floor(Math.sin(t * Math.PI) * 127 + 128);
         const g = Math.floor(Math.sin(t * Math.PI + 2) * 127 + 128);
         const b = Math.floor(Math.sin(t * Math.PI + 4) * 127 + 128);
-
         return (r << 16) | (g << 8) | b;
     }
 
-    /**
-     * ✨ Kugel zur Szene hinzufügen
-     */
     public addSphere(
         position: { x: number; y: number; z: number },
         radius: number,
@@ -179,17 +200,14 @@ export class Scene {
         this.scene.add(sphere);
         this.meshes.push(sphere);
 
+        //Position für neues Objekt speichern
+        const index = this.meshes.length - 1;
+        this.lastSpherePositions.set(index, sphere.position.clone());
+
         return sphere;
     }
 
-    /**
-     * 🔲 Generiere ein neues Grid
-     */
-    public generateSphereGrid(
-        gridSize: number,
-        spacing: number = 3.0,
-        baseRadius: number = 0.3
-    ): void {
+    public generateSphereGrid(gridSize: number, spacing: number = 3.0, baseRadius: number = 0.3): void {
         this.logger.info(`Generiere ${gridSize}³ = ${gridSize * gridSize * gridSize} Kugeln Grid...`);
 
         this.clearSpheres();
@@ -206,20 +224,10 @@ export class Scene {
                     };
 
                     const radius = baseRadius + (x + y + z) * 0.01;
-                    const color = this.getGridColor(
-                        x, y, z,
-                        { x: gridSize, y: gridSize, z: gridSize }
-                    );
+                    const color = this.getGridColor(x, y, z, { x: gridSize, y: gridSize, z: gridSize });
                     const metallic = (x % 2 === 0 && y % 2 === 0) ? 0.9 : 0.1;
 
-                    this.addSphere(
-                        position,
-                        radius,
-                        color,
-                        metallic,
-                        0.2,
-                        `Grid_${x}_${y}_${z}`
-                    );
+                    this.addSphere(position, radius, color, metallic, 0.2, `Grid_${x}_${y}_${z}`);
                 }
             }
         }
@@ -227,20 +235,13 @@ export class Scene {
         this.logger.success(`Grid erstellt: ${this.meshes.length} Kugeln`);
     }
 
-    /**
-     * 🎨 Farbe für Grid-Position berechnen
-     */
     private getGridColor(x: number, y: number, z: number, gridSize: { x: number; y: number; z: number }): number {
         const r = Math.floor((x / gridSize.x) * 255);
         const g = Math.floor((y / gridSize.y) * 255);
         const b = Math.floor((z / gridSize.z) * 255);
-
         return (r << 16) | (g << 8) | b;
     }
 
-    /**
-     * 🔲 Generiere Wand aus Kugeln
-     */
     public generateSphereWall(width: number, height: number): void {
         this.logger.info(`Generiere ${width}x${height} = ${width * height} Kugeln Wand...`);
 
@@ -262,23 +263,13 @@ export class Scene {
                 const color = this.getRectangleColor(x, y, width, height);
                 const metallic = (x % 2 === 0 && y % 2 === 0) ? 0.8 : 0.1;
 
-                this.addSphere(
-                    position,
-                    baseRadius,
-                    color,
-                    metallic,
-                    0.3,
-                    `Wall_${x}_${y}`
-                );
+                this.addSphere(position, baseRadius, color, metallic, 0.3, `Wall_${x}_${y}`);
             }
         }
 
         this.logger.success(`Wand erstellt: ${this.meshes.length} Kugeln`);
     }
 
-    /**
-     * 🔄 Kugeln für Raytracer extrahieren
-     */
     public getSpheresData(): Float32Array {
         const maxSpheres = 1000;
         const floatsPerSphere = 8;
@@ -316,9 +307,6 @@ export class Scene {
         return data;
     }
 
-    /**
-     * 💡 Primary Light Position für GPU
-     */
     public getPrimaryLightPosition(): { x: number; y: number; z: number } {
         const light = this.lights.find(l => l instanceof THREE.PointLight) as THREE.PointLight;
         if (light) {
@@ -329,23 +317,14 @@ export class Scene {
         return { x: 10, y: 10, z: 10 };
     }
 
-    /**
-     * 💡 Ambient Light Stärke abrufen
-     */
     public getAmbientIntensity(): number {
         return this.ambientLightIntensity;
     }
 
-    /**
-     * 📊 Anzahl der Kugeln
-     */
     public getSphereCount(): number {
         return this.meshes.length;
     }
 
-    /**
-     * 🧹 Alle Kugeln entfernen
-     */
     public clearSpheres(): void {
         this.meshes.forEach(mesh => {
             this.scene.remove(mesh);
@@ -353,19 +332,17 @@ export class Scene {
             (mesh.material as THREE.Material).dispose();
         });
         this.meshes = [];
+
+        // Tracking-Daten zurücksetzen
+        this.lastSpherePositions.clear();
+        this.movedSpheres.clear();
     }
 
-    /**
-     * 📐 Kamera-Aspect-Ratio aktualisieren
-     */
     public updateCameraAspect(width: number, height: number): void {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
     }
 
-    /**
-     * 📊 Kamera-Daten für GPU-Buffer abrufen
-     */
     public getCameraData(): Float32Array {
         const lookAtTarget = new THREE.Vector3(0, 0, 0);
         this.camera.getWorldDirection(lookAtTarget);
@@ -383,25 +360,17 @@ export class Scene {
         ]);
     }
 
-    /**
-     * 🎬 Kamera-Rotation starten
-     */
+    // Kamera-Animation Methoden
     public startCameraRotation(): void {
         this.isRotating = true;
-        this.logger.info('🎬 Kamera-Rotation gestartet');
+        this.logger.info('Kamera-Rotation gestartet');
     }
 
-    /**
-     * ⏸️ Kamera-Rotation stoppen
-     */
     public stopCameraRotation(): void {
         this.isRotating = false;
-        this.logger.info('⏸️ Kamera-Rotation gestoppt');
+        this.logger.info('Kamera-Rotation gestoppt');
     }
 
-    /**
-     * 🔄 Kamera-Position aktualisieren (einmal pro Frame aufrufen)
-     */
     public updateCamera(): boolean {
         if (!this.isRotating) {
             return false;
@@ -422,38 +391,23 @@ export class Scene {
         return true;
     }
 
-    /**
-     * 🎥 Rotation-Status abrufen
-     */
     public isRotationActive(): boolean {
         return this.isRotating;
     }
 
-    /**
-     * ⚙️ Rotations-Geschwindigkeit ändern
-     */
     public setRotationSpeed(speed: number): void {
         this.rotationSpeed = speed;
         this.logger.info(`Rotations-Geschwindigkeit: ${speed}°/Frame`);
     }
 
-    /**
-     * 📷 Kamera abrufen
-     */
     public getCamera(): THREE.PerspectiveCamera {
         return this.camera;
     }
 
-    /**
-     * 🌍 Three.js Szene abrufen
-     */
     public getThreeScene(): THREE.Scene {
         return this.scene;
     }
 
-    /**
-     * 📋 Szenen-Informationen loggen
-     */
     private logSceneInfo(): void {
         this.logger.info('=== SZENEN-INFORMATION ===');
         this.logger.info(`  Kamera Position: (${this.camera.position.x}, ${this.camera.position.y}, ${this.camera.position.z})`);
@@ -462,9 +416,6 @@ export class Scene {
         this.logger.info('========================');
     }
 
-    /**
-     * 🧹 Ressourcen aufräumen
-     */
     public cleanup(): void {
         this.meshes.forEach(mesh => {
             mesh.geometry.dispose();
@@ -475,6 +426,10 @@ export class Scene {
 
         this.meshes = [];
         this.lights = [];
+
+        // Cleanup für Tracking
+        this.lastSpherePositions.clear();
+        this.movedSpheres.clear();
 
         this.logger.init('Szenen-Ressourcen aufgeräumt');
     }

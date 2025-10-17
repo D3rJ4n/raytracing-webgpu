@@ -1,8 +1,5 @@
-/**
- * 📢 Constants - Zentrale Konfiguration
- */
+// src/utils/Constants.ts - Optimaler Geometry-Cache
 
-// ===== CANVAS & RENDERING =====
 export const CANVAS_CONFIG = {
     ID: 'canvas',
     DEFAULT_WIDTH: 800,
@@ -13,13 +10,11 @@ export const STATUS_CONFIG = {
     ELEMENT_ID: 'status',
 } as const;
 
-// ===== WEBGPU KONFIGURATION =====
 export const WEBGPU_CONFIG = {
     POWER_PREFERENCE: 'high-performance' as GPUPowerPreference,
     ALPHA_MODE: 'opaque' as GPUCanvasAlphaMode,
 } as const;
 
-// ===== SHADER KONFIGURATION =====
 export const SHADER_CONFIG = {
     WORKGROUP_SIZE: {
         X: 8,
@@ -38,7 +33,7 @@ export const SHADER_CONFIG = {
     },
 } as const;
 
-// ===== BUFFER KONFIGURATION =====
+// OPTIMALER GEOMETRY-CACHE: 6 float32 pro Pixel
 export const BUFFER_CONFIG = {
     CAMERA: {
         SIZE: 48,
@@ -49,7 +44,7 @@ export const BUFFER_CONFIG = {
         LABEL: 'Sphere Buffer',
     },
     SPHERES: {
-        MAX_COUNT: 1000,  // ← ERHÖHT von 20 auf 1000!
+        MAX_COUNT: 1000,
         BYTES_PER_SPHERE: 48,
         get SIZE() {
             return this.MAX_COUNT * this.BYTES_PER_SPHERE;
@@ -65,10 +60,10 @@ export const BUFFER_CONFIG = {
         LABEL: 'Scene Config Buffer',
     },
     CACHE: {
-        COMPONENTS_PER_PIXEL: 4,
-        BYTES_PER_COMPONENT: 4,
-        BYTES_PER_PIXEL: 16,
-        LABEL: 'Color Cache Buffer',
+        COMPONENTS_PER_PIXEL: 6,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, valid
+        BYTES_PER_COMPONENT: 4,      // 4 bytes pro float32
+        BYTES_PER_PIXEL: 24,         // 6 * 4 = 24 bytes pro Pixel
+        LABEL: 'Geometry Cache Buffer',
     },
     ACCUMULATION: {
         COMPONENTS_PER_PIXEL: 4,
@@ -78,7 +73,21 @@ export const BUFFER_CONFIG = {
     },
 } as const;
 
-// ===== TEXTURE KONFIGURATION =====
+// Cache-Layout pro Pixel (6 float32 Werte):
+export const GEOMETRY_CACHE = {
+    SPHERE_INDEX: 0,    // Index 0: Welche Sphere (als float, 0.0 = invalid)
+    HIT_DISTANCE: 1,    // Index 1: Entfernung zum Hit-Point
+    HIT_POINT_X: 2,     // Index 2: Hit-Point X-Koordinate
+    HIT_POINT_Y: 3,     // Index 3: Hit-Point Y-Koordinate  
+    HIT_POINT_Z: 4,     // Index 4: Hit-Point Z-Koordinate
+    VALID_FLAG: 5,      // Index 5: 1.0 = valid, 0.0 = invalid
+
+    // Spezielle Werte für SPHERE_INDEX
+    INVALID_VALUE: 0.0,      // Kein Hit
+    BACKGROUND_VALUE: -1.0,  // Background Hit
+    GROUND_VALUE: -2.0,      // Ground Hit
+} as const;
+
 export const TEXTURE_CONFIG = {
     FORMAT: 'rgba8unorm' as GPUTextureFormat,
     USAGE: {
@@ -91,17 +100,6 @@ export const TEXTURE_CONFIG = {
     LABEL: 'Render Texture',
 } as const;
 
-// ===== CACHE KONSTANTEN =====
-export const CACHE_CONFIG = {
-    INVALID: 0,
-    VALID: 1,
-    COLOR_RANGE: {
-        MIN: 0,
-        MAX: 255,
-    },
-} as const;
-
-// ===== SCENE KONFIGURATION =====
 export const SCENE_CONFIG = {
     CAMERA: {
         FOV: 60,
@@ -130,7 +128,6 @@ export const SCENE_CONFIG = {
     },
 } as const;
 
-// ===== RAYTRACING KONFIGURATION =====
 export const RAYTRACING_CONFIG = {
     FOV_RADIANS: 1.0472,
     NO_HIT_VALUE: -1.0,
@@ -138,7 +135,6 @@ export const RAYTRACING_CONFIG = {
     SPHERE_COLOR: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
 } as const;
 
-// ===== PERFORMANCE & DEBUG =====
 export const PERFORMANCE_CONFIG = {
     CACHE_STATS_INTERVAL: 10,
     CACHE_STATS_INITIAL_FRAMES: 4,
@@ -151,7 +147,6 @@ export const DEBUG_CONFIG = {
     LOG_LEVEL: 'INFO' as 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR',
 } as const;
 
-// ===== BIND GROUP LAYOUTS =====
 export const BINDING_CONFIG = {
     COMPUTE: {
         CAMERA: 0,
@@ -168,7 +163,6 @@ export const BINDING_CONFIG = {
     },
 } as const;
 
-// ===== STATUS CSS CLASSES =====
 export const STATUS_CLASSES = {
     INFO: 'info-text',
     SUCCESS: 'success',
@@ -176,7 +170,7 @@ export const STATUS_CLASSES = {
     WARNING: 'warning',
 } as const;
 
-// ===== UTILITY FUNCTIONS =====
+// Hilfsfunktionen
 export function calculateCacheBufferSize(width: number, height: number): number {
     const pixelCount = width * height;
     return pixelCount * BUFFER_CONFIG.CACHE.BYTES_PER_PIXEL;

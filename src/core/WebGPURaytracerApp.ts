@@ -6,7 +6,6 @@ import { ComputePipeline } from './ComputePipeline';
 import { RenderPipeline } from './RenderPipeline';
 import { Renderer } from '../rendering/Renderer';
 import { PixelCache } from '../cache/PixelCache';
-import { CacheDebugger } from '../cache/CacheDebugger';
 import { StatusDisplay } from '../utils/StatusDisplay';
 import { Logger } from '../utils/Logger';
 import { PerformanceMonitor } from '../utils/PerformanceMonitor';
@@ -24,12 +23,19 @@ export class WebGPURaytracerApp {
     private renderPipeline: RenderPipeline;
     private renderer: Renderer;
     private pixelCache: PixelCache;
-    private cacheDebugger: CacheDebugger;
     private performanceMonitor: PerformanceMonitor;
 
     private currentSample: number = 0;
     private maxSamples: number = 0;
     private isAccumulating: boolean = false;
+
+    // Bewegungs-Tracking Eigenschaften
+    private movementTrackingEnabled: boolean = true;
+    private movementStats = {
+        totalMovements: 0,
+        totalInvalidations: 0,
+        lastMovementFrame: 0
+    };
 
     private logger: Logger;
     private initialized: boolean = false;
@@ -56,7 +62,6 @@ export class WebGPURaytracerApp {
         this.renderPipeline = new RenderPipeline();
         this.renderer = new Renderer();
         this.pixelCache = new PixelCache();
-        this.cacheDebugger = new CacheDebugger();
     }
 
     public async initialize(): Promise<void> {
@@ -103,13 +108,6 @@ export class WebGPURaytracerApp {
                 this.bufferManager.getCacheBuffer()
             );
 
-            this.cacheDebugger.initialize(
-                this.webgpuDevice.getDevice(),
-                this.bufferManager.getCacheBuffer(),
-                this.canvas.width,
-                this.canvas.height
-            );
-
             this.logger.init('Erstelle Rendering-Pipelines...');
 
             await this.computePipeline.initialize(
@@ -140,43 +138,114 @@ export class WebGPURaytracerApp {
             this.logger.init('Rendere ersten Frame...');
             await this.renderFrame();
 
-            this.statusDisplay.showSuccess('✅ WebGPU Raytracer mit Three.js läuft!');
+            this.statusDisplay.showSuccess('WebGPU Raytracer mit Three.js läuft!');
             this.logger.success('Initialisierung erfolgreich abgeschlossen');
 
         } catch (error) {
             this.logger.error('Fehler bei Initialisierung:', error);
-            this.statusDisplay.showError(`❌ Fehler: ${error instanceof Error ? error.message : 'Unbekannt'}`);
+            this.statusDisplay.showError(`Fehler: ${error instanceof Error ? error.message : 'Unbekannt'}`);
             throw error;
         }
     }
 
-    /**
-     * 🎬 Einzelnen Frame rendern (mit Performance-Tracking)
-     */
     public async renderFrame(): Promise<void> {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
         }
 
+        // Bewegungen tracken 
+        if (this.movementTrackingEnabled) {
+            const movedSpheres = this.scene.trackMovements();
+
+            if (movedSpheres.length > 0) {
+                this.logger.info(`Bewegte Objekte: ${movedSpheres.length} (${movedSpheres.slice(0, 3).join(', ')}${movedSpheres.length > 3 ? '...' : ''})`);
+
+                // Cache für bewegte Objekte invalidieren
+                const invalidationStartTime = performance.now();
+
+                movedSpheres.forEach(sphereIndex => {
+                    this.bufferManager.invalidatePixelsForSphere(sphereIndex);
+                });
+
+                const invalidationTime = performance.now() - invalidationStartTime;
+
+                // Statistiken aktualisieren
+                this.movementStats.totalMovements += movedSpheres.length;
+                this.movementStats.totalInvalidations++;
+                this.movementStats.lastMovementFrame = this.renderer.getFrameCount();
+
+                this.logger.cache(
+                    `Cache-Invalidierung: ${movedSpheres.length} Objekte in ${invalidationTime.toFixed(2)}ms`
+                );
+            }
+        }
+
         const startTime = performance.now();
         await this.renderer.renderFrame(this.canvas);
 
-        // ⭐ WICHTIG: Warten bis GPU fertig ist!
         await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
 
         const frameTime = performance.now() - startTime;
 
         this.performanceMonitor.recordFrameTime(frameTime);
 
-        // Jetzt Cache-Statistiken lesen (GPU ist jetzt fertig!)
         await this.pixelCache.readStatistics();
         const cacheStats = this.pixelCache.getStatistics();
         this.performanceMonitor.recordCacheStats(cacheStats);
     }
 
-    /**
-     * 🔲 Sphere Grid für Performance-Tests erstellen
-     */
+    // Bewegungs-Tracking Konfiguration
+    public enableMovementTracking(enabled: boolean): void {
+        this.movementTrackingEnabled = enabled;
+
+        if (enabled) {
+            this.logger.info('Bewegungs-Tracking aktiviert');
+        } else {
+            this.logger.info('Bewegungs-Tracking deaktiviert');
+            this.scene.clearMovementTracking();
+        }
+    }
+
+    // Bewegungs-Statistiken abrufen
+    public getMovementStats(): {
+        totalMovements: number;
+        totalInvalidations: number;
+        lastMovementFrame: number;
+        movementTrackingEnabled: boolean;
+        sceneMovementInfo: { totalMoved: number; currentlyTracked: number };
+        invalidationStats: any;
+    } {
+        return {
+            ...this.movementStats,
+            movementTrackingEnabled: this.movementTrackingEnabled,
+            sceneMovementInfo: this.scene.getMovementInfo(),
+            invalidationStats: this.bufferManager.getInvalidationStats()
+        };
+    }
+
+    // Detaillierte Bewegungs-Statistiken loggen
+    public logMovementStats(): void {
+        const stats = this.getMovementStats();
+
+        console.log('\n' + '='.repeat(60));
+        console.log('📊 BEWEGUNGS-TRACKING STATISTIKEN');
+        console.log('='.repeat(60));
+        console.log(`Tracking aktiviert:       ${stats.movementTrackingEnabled ? 'JA' : 'NEIN'}`);
+        console.log(`Gesamt Bewegungen:        ${stats.totalMovements}`);
+        console.log(`Invalidierungen:          ${stats.totalInvalidations}`);
+        console.log(`Letzte Bewegung (Frame):  ${stats.lastMovementFrame}`);
+        console.log(`Aktuell getrackte Objekte: ${stats.sceneMovementInfo.currentlyTracked}`);
+        console.log(`Insgesamt bewegte Objekte: ${stats.sceneMovementInfo.totalMoved}`);
+
+        const invalidationStats = stats.invalidationStats;
+        console.log('\n--- Cache-Invalidierung ---');
+        console.log(`Totale Invalidierungen:   ${invalidationStats.totalInvalidations}`);
+        console.log(`Invalidierte Pixel:       ${invalidationStats.pixelsInvalidated.toLocaleString()}`);
+        console.log(`Ø Pixel pro Invalidierung: ${invalidationStats.avgPixelsPerInvalidation.toFixed(0)}`);
+        console.log(`Letzte Invalidierung:     ${invalidationStats.lastInvalidationTime.toFixed(2)}ms`);
+        console.log('='.repeat(60));
+    }
+
     public createSphereGrid(gridSize: number): void {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -200,9 +269,6 @@ export class WebGPURaytracerApp {
         this.logger.success(`Grid erstellt: ${sphereCount} Kugeln`);
     }
 
-    /**
-     * 🔲 Sphere Wall für Performance-Tests
-     */
     public createSphereWall(width: number, height: number): void {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -226,23 +292,6 @@ export class WebGPURaytracerApp {
         this.logger.success(`Wand erstellt: ${sphereCount} Kugeln`);
     }
 
-    /**
-     * 🧪 Cache-Debug-Test starten
-     */
-    public async startCacheDebugTest(): Promise<void> {
-        if (!this.initialized) {
-            throw new Error('App nicht initialisiert');
-        }
-
-        this.logger.test('Starte Cache-Debug-Test...');
-        await this.cacheDebugger.runDebugTest(
-            () => this.renderer.renderFrame(this.canvas)
-        );
-    }
-
-    /**
-     * 📊 Cache-Statistiken anzeigen
-     */
     public async showCacheStatistics(): Promise<void> {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -251,9 +300,6 @@ export class WebGPURaytracerApp {
         await this.pixelCache.logStatisticsWithRead(this.renderer.getFrameCount());
     }
 
-    /**
-     * 📊 Performance-Statistiken anzeigen
-     */
     public showPerformanceStats(): void {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -265,9 +311,6 @@ export class WebGPURaytracerApp {
         console.log(`\n${rating.message}\n`);
     }
 
-    /**
-     * 👁️ Performance-Display umschalten
-     */
     public togglePerformanceDisplay(visible?: boolean): void {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -281,9 +324,6 @@ export class WebGPURaytracerApp {
         this.performanceMonitor.toggleDisplay(visible);
     }
 
-    /**
-     * 🔄 Cache zurücksetzen
-     */
     public async resetCache(): Promise<void> {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -291,21 +331,23 @@ export class WebGPURaytracerApp {
 
         this.pixelCache.reset();
 
-        // ⭐ WICHTIG: Warten bis GPU den Cache wirklich gelöscht hat!
+        // BufferManager cache reset mit korrekten Dimensionen
+        this.bufferManager.resetCache(this.canvas.width, this.canvas.height);
+
+        // Invalidierung-Statistiken zurücksetzen
+        this.bufferManager.resetInvalidationStats();
+
         await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
 
-        this.logger.info('Cache zurückgesetzt');
+        this.logger.info('Cache zurückgesetzt (6 float32 Struktur)');
     }
 
-    /**
-     * 🎨 Progressive Supersampling starten
-     */
     public async startProgressiveSupersampling(maxSamples: number = 16): Promise<void> {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
         }
 
-        this.logger.info(`🎨 Starte Progressive Supersampling: ${maxSamples} samples`);
+        this.logger.info(`Starte Progressive Supersampling: ${maxSamples} samples`);
 
         this.bufferManager.resetAccumulation(this.canvas.width, this.canvas.height);
         this.currentSample = 0;
@@ -320,12 +362,10 @@ export class WebGPURaytracerApp {
             const baseCameraData = this.scene.getCameraData();
             this.bufferManager.updateCameraDataWithRandomSeeds(baseCameraData, sample);
 
-            await this.renderFrame();
-
             if (sample % 4 === 0 || sample === maxSamples - 1) {
                 const progress = ((sample + 1) / maxSamples * 100).toFixed(0);
                 this.statusDisplay.showInfo(
-                    `🎨 Supersampling: ${sample + 1}/${maxSamples} (${progress}%)`
+                    `Supersampling: ${sample + 1}/${maxSamples} (${progress}%)`
                 );
             }
 
@@ -340,18 +380,15 @@ export class WebGPURaytracerApp {
         this.isAccumulating = false;
 
         this.logger.success(
-            `✅ Supersampling abgeschlossen: ${maxSamples} samples in ${totalTime.toFixed(0)}ms ` +
+            `Supersampling abgeschlossen: ${maxSamples} samples in ${totalTime.toFixed(0)}ms ` +
             `(${avgTimePerSample.toFixed(1)}ms/sample)`
         );
 
         this.statusDisplay.showSuccess(
-            `✅ ${maxSamples}x Supersampling abgeschlossen (${totalTime.toFixed(0)}ms)`
+            `${maxSamples}x Supersampling abgeschlossen (${totalTime.toFixed(0)}ms)`
         );
     }
 
-    /**
-     * 🔄 Accumulation zurücksetzen
-     */
     public resetAccumulation(): void {
         if (!this.initialized) {
             throw new Error('App nicht initialisiert');
@@ -361,31 +398,23 @@ export class WebGPURaytracerApp {
         this.currentSample = 0;
         this.isAccumulating = false;
 
-        this.logger.info('🔄 Accumulation zurückgesetzt');
+        this.logger.info('Accumulation zurückgesetzt');
     }
 
-    /**
-     * 📊 Performance Monitor abrufen
-     */
     public getPerformanceMonitor(): PerformanceMonitor {
         return this.performanceMonitor;
     }
 
-    /**
-     * 🔄 Buffer Manager für direkten Zugriff (für main.ts)
-     */
     public getBufferManager(): BufferManager {
         return this.bufferManager;
     }
 
-    /**
-     * 📊 App-Status abrufen
-     */
     public getStatus(): {
         initialized: boolean;
         frameCount: number;
         canvasSize: { width: number; height: number };
         sphereCount: number;
+        movementTracking: boolean;
     } {
         return {
             initialized: this.initialized,
@@ -394,15 +423,13 @@ export class WebGPURaytracerApp {
                 width: this.canvas.width,
                 height: this.canvas.height
             },
-            sphereCount: this.initialized ? this.scene.getSphereCount() : 0
+            sphereCount: this.initialized ? this.scene.getSphereCount() : 0,
+            movementTracking: this.movementTrackingEnabled
         };
     }
 
-    /**
-     * 🧹 Ressourcen aufräumen
-     */
     public cleanup(): void {
-        this.logger.info('🧹 Räume Ressourcen auf...');
+        this.logger.info('Räume Ressourcen auf...');
 
         if (this.bufferManager) {
             this.bufferManager.cleanup();
@@ -421,6 +448,6 @@ export class WebGPURaytracerApp {
         }
 
         this.initialized = false;
-        this.logger.info('✅ Cleanup abgeschlossen');
+        this.logger.info('Cleanup abgeschlossen');
     }
 }

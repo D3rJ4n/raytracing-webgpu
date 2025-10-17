@@ -20,8 +20,7 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
     output.position = vec4<f32>(x * 2.0 - 1.0, -y * 2.0 + 1.0, 0.0, 1.0);
     // UV-Koordinaten (0 bis 1) für Textur-Sampling
     output.uv = vec2<f32>(x, y);
-    
-    return output;
+        return output;
 }
 
 // GPU-Resourcen für den Render-Shader

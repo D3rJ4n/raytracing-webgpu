@@ -25,7 +25,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🚀 Render Pipeline initialisieren
+     *  Render Pipeline initialisieren
      */
     public async initialize(
         device: GPUDevice,
@@ -58,7 +58,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 📁 Render Shader laden und kompilieren
+     *  Render Shader laden und kompilieren
      */
     private async loadRenderShader(): Promise<void> {
         if (!this.device) {
@@ -88,7 +88,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🏗️ Bind Group Layout erstellen
+     *  Bind Group Layout erstellen
      */
     private createBindGroupLayout(): void {
         if (!this.device) {
@@ -124,7 +124,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🎨 Render Pipeline erstellen
+     *  Render Pipeline erstellen
      */
     private createRenderPipeline(): void {
         if (!this.device || !this.renderModule || !this.bindGroupLayout) {
@@ -162,7 +162,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🔗 Bind Group erstellen
+     *  Bind Group erstellen
      */
     private createBindGroup(inputTexture: GPUTexture, sampler: GPUSampler): void {
         if (!this.device || !this.bindGroupLayout) {
@@ -190,7 +190,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🔄 Bind Group aktualisieren (z.B. bei neuer Texture)
+     * Bind Group aktualisieren (z.B. bei neuer Texture)
      */
     public updateBindGroup(inputTexture: GPUTexture, sampler: GPUSampler): void {
         if (!this.device || !this.bindGroupLayout) {
@@ -203,7 +203,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 📊 Pipeline-Informationen abrufen
+     *  Pipeline-Informationen abrufen
      */
     public getInfo(): {
         isInitialized: boolean;
@@ -224,7 +224,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🎨 Render Pipeline abrufen
+     *  Render Pipeline abrufen
      */
     public getPipeline(): GPURenderPipeline {
         if (!this.pipeline) {
@@ -234,7 +234,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🔗 Bind Group abrufen
+     *  Bind Group abrufen
      */
     public getBindGroup(): GPUBindGroup {
         if (!this.bindGroup) {
@@ -244,7 +244,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🏗️ Bind Group Layout abrufen
+     *  Bind Group Layout abrufen
      */
     public getBindGroupLayout(): GPUBindGroupLayout {
         if (!this.bindGroupLayout) {
@@ -254,7 +254,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 📁 Shader Module abrufen
+     *  Shader Module abrufen
      */
     public getShaderModule(): GPUShaderModule {
         if (!this.renderModule) {
@@ -264,7 +264,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🎭 Fullscreen Triangle rendern
+     *  Fullscreen Triangle rendern
      */
     public renderFullscreenTriangle(renderPass: GPURenderPassEncoder): void {
         if (!this.isInitialized()) {
@@ -282,7 +282,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🖼️ Render Pass erstellen und ausführen
+     *  Render Pass erstellen und ausführen
      */
     public executeRenderPass(
         commandEncoder: GPUCommandEncoder,
@@ -302,7 +302,7 @@ export class RenderPipeline {
     }
 
     /**
-     * ✅ Initialisierungs-Status prüfen
+     *  Initialisierungs-Status prüfen
      */
     public isInitialized(): boolean {
         return this.device !== null &&
@@ -313,7 +313,7 @@ export class RenderPipeline {
     }
 
     /**
-     * 🧹 Ressourcen aufräumen
+     *  Ressourcen aufräumen
      */
     public cleanup(): void {
         // WebGPU Ressourcen können nicht explizit zerstört werden

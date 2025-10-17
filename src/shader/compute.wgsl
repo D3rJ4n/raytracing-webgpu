@@ -1,5 +1,3 @@
-// ===== WGSL COMPUTE SHADER MIT REFLEXIONEN UND CACHE =====
-
 // ===== STRUKTUREN =====
 
 struct Camera {
@@ -55,37 +53,98 @@ struct Ray {
     direction: vec3<f32>,
 }
 
+// Neue Struktur für gecachte Geometrie-Daten
+struct CachedGeometry {
+    valid: bool,
+    sphereIndex: f32,
+    hitDistance: f32,
+    hitPoint: vec3<f32>,
+}
+
 // ===== BINDINGS =====
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> spheres: array<SphereData>; 
 @group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
 @group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(4) var<storage, read_write> pixelCache: array<u32>;
+@group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>; // Jetzt float32 Array
 @group(0) @binding(5) var<storage, read_write> accumulationBuffer: array<f32>;
 @group(0) @binding(6) var<uniform> sceneConfig: SceneConfig;
 
 // ===== KONSTANTEN =====
 
-const MAX_SPHERES: u32 = 1000u;  // ← ERHÖHT von 11u auf 1000u!
+const MAX_SPHERES: u32 = 1000u;
 const PI: f32 = 3.14159265359;
 const EPSILON: f32 = 0.001;
 
-// ===== RANDOM NUMBER GENERATOR =====
+// Material-IDs
+const GROUND_MATERIAL_ID: u32 = 999u;  // Außerhalb des Sphere-Bereichs (0-624)
 
-fn pcgHash(input: u32) -> u32 {
-    var state = input * 747796405u + 2891336453u;
-    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
+// CACHE-LAYOUT (6 float32 pro Pixel)
+const CACHE_SPHERE_INDEX: u32 = 0u;   // Welche Sphere (0.0=invalid, -1.0=background, -2.0=ground, >0=sphere)
+const CACHE_HIT_DISTANCE: u32 = 1u;   // Entfernung zum Hit-Point
+const CACHE_HIT_POINT_X: u32 = 2u;    // Hit-Point X
+const CACHE_HIT_POINT_Y: u32 = 3u;    // Hit-Point Y  
+const CACHE_HIT_POINT_Z: u32 = 4u;    // Hit-Point Z
+const CACHE_VALID_FLAG: u32 = 5u;     // 1.0 = valid, 0.0 = invalid
+
+// Spezielle Werte
+const CACHE_INVALID: f32 = 0.0;
+const CACHE_BACKGROUND: f32 = -1.0;
+const CACHE_GROUND: f32 = -2.0;
+
+// ===== OPTIMALER CACHE =====
+
+fn getCacheBaseIndex(coords: vec2<i32>) -> u32 {
+    let pixelIndex = u32(coords.y) * renderInfo.width + u32(coords.x);
+    let baseIndex = pixelIndex * 6u;
+    
+    // Sicherheitsprüfung: Stelle sicher, dass baseIndex + 5 im Buffer liegt
+    let totalFloats = renderInfo.width * renderInfo.height * 6u;
+    if (baseIndex + 5u >= totalFloats) {
+        return 0u; // Fallback auf erstes Pixel
+    }
+    
+    return baseIndex;
 }
 
-fn randomFloat(seed: ptr<function, u32>) -> f32 {
-    *seed = pcgHash(*seed);
-    return f32(*seed) / 4294967296.0;
+fn isCacheValid(coords: vec2<i32>) -> bool {
+    let baseIndex = getCacheBaseIndex(coords);
+    return geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
 }
 
-fn randomFloat2(seed: ptr<function, u32>) -> vec2<f32> {
-    return vec2<f32>(randomFloat(seed), randomFloat(seed));
+// Speichere vollständige Geometrie im Cache
+fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>) {
+    let baseIndex = getCacheBaseIndex(coords);
+    geometryCache[baseIndex + CACHE_SPHERE_INDEX] = sphereIndex;
+    geometryCache[baseIndex + CACHE_HIT_DISTANCE] = hitDistance;
+    geometryCache[baseIndex + CACHE_HIT_POINT_X] = hitPoint.x;
+    geometryCache[baseIndex + CACHE_HIT_POINT_Y] = hitPoint.y;
+    geometryCache[baseIndex + CACHE_HIT_POINT_Z] = hitPoint.z;
+    geometryCache[baseIndex + CACHE_VALID_FLAG] = 1.0;
+}
+
+// Lade vollständige Geometrie aus Cache
+fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
+    let baseIndex = getCacheBaseIndex(coords);
+    
+    var cached: CachedGeometry;
+    cached.valid = geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
+    cached.sphereIndex = geometryCache[baseIndex + CACHE_SPHERE_INDEX];
+    cached.hitDistance = geometryCache[baseIndex + CACHE_HIT_DISTANCE];
+    cached.hitPoint = vec3<f32>(
+        geometryCache[baseIndex + CACHE_HIT_POINT_X],
+        geometryCache[baseIndex + CACHE_HIT_POINT_Y],
+        geometryCache[baseIndex + CACHE_HIT_POINT_Z]
+    );
+    
+    return cached;
+}
+
+// Cache-Invalidierung: Setze nur Valid-Flag auf 0
+fn invalidateCache(coords: vec2<i32>) {
+    let baseIndex = getCacheBaseIndex(coords);
+    geometryCache[baseIndex + CACHE_VALID_FLAG] = 0.0;
 }
 
 // ===== ACCUMULATION BUFFER =====
@@ -119,33 +178,6 @@ fn getAverageColor(coords: vec2<i32>) -> vec3<f32> {
         return vec3<f32>(totalR / count, totalG / count, totalB / count);
     }
     return vec3<f32>(0.0);
-}
-
-// ===== CACHE FUNKTIONEN =====
-
-fn getCacheIndex(coords: vec2<i32>) -> u32 {
-    return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
-}
-
-fn isCacheValid(coords: vec2<i32>) -> bool {
-    let baseIndex = getCacheIndex(coords);
-    return pixelCache[baseIndex + 3u] == 1u;
-}
-
-fn setCachedColor(coords: vec2<i32>, color: vec4<f32>) {
-    let baseIndex = getCacheIndex(coords);
-    pixelCache[baseIndex + 0u] = u32(clamp(color.r * 255.0, 0.0, 255.0));
-    pixelCache[baseIndex + 1u] = u32(clamp(color.g * 255.0, 0.0, 255.0));
-    pixelCache[baseIndex + 2u] = u32(clamp(color.b * 255.0, 0.0, 255.0));
-    pixelCache[baseIndex + 3u] = 1u;
-}
-
-fn getCachedColor(coords: vec2<i32>) -> vec4<f32> {
-    let baseIndex = getCacheIndex(coords);
-    let r = f32(pixelCache[baseIndex + 0u]) / 255.0;
-    let g = f32(pixelCache[baseIndex + 1u]) / 255.0;
-    let b = f32(pixelCache[baseIndex + 2u]) / 255.0;
-    return vec4<f32>(r, g, b, 1.0);
 }
 
 // ===== CAMERA RAY =====
@@ -239,7 +271,7 @@ fn findClosestHit(ray: Ray) -> HitRecord {
         closest.t = tPlane;
         closest.point = ray.origin + ray.direction * tPlane;
         closest.normal = vec3<f32>(0.0, 1.0, 0.0);
-        closest.material = 100u;
+        closest.material = GROUND_MATERIAL_ID;  // Korrekte Ground-Material-ID
         closest.color = vec3<f32>(0.6, 0.6, 0.6);
         closest.metallic = 0.0;
     }
@@ -247,55 +279,15 @@ fn findClosestHit(ray: Ray) -> HitRecord {
     return closest;
 }
 
-// ===== SHADOW CHECK =====
-
-fn isInShadow(point: vec3<f32>, lightPos: vec3<f32>) -> bool {
-    let lightDir = normalize(lightPos - point);
-    let lightDist = length(lightPos - point);
-    let shadowRayOrigin = point + lightDir * EPSILON;
-    
-    // ← NUTZE DYNAMISCHE SPHERE COUNT!
-    let actualSphereCount = min(renderInfo.sphereCount, MAX_SPHERES);
-    
-    for (var i = 0u; i < actualSphereCount; i++) {
-        let t = intersectSphere(shadowRayOrigin, lightDir, i);
-        if (t > 0.0 && t < lightDist) {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
 // ===== LIGHTING =====
 
-fn calculateLighting(hitRecord: HitRecord) -> vec3<f32> {
-    let lightDir = normalize(sceneConfig.lightPos - hitRecord.point);
-    let diffuse = max(dot(hitRecord.normal, lightDir), 0.0);
-    let ambient = sceneConfig.ambientStrength;  
+fn calculateLighting(hitPoint: vec3<f32>, normal: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
+    let lightDir = normalize(sceneConfig.lightPos - hitPoint);
+    let diffuse = max(dot(normal, lightDir), 0.0);
+    let ambient = sceneConfig.ambientStrength;
     
-    var shadowFactor = 1.0;
-    if (sceneConfig.shadowEnabled > 0.5 && diffuse > 0.0) {
-        if (isInShadow(hitRecord.point, sceneConfig.lightPos)) {
-            shadowFactor = 0.3;
-        }
-    }
-    
-    let lighting = ambient + diffuse * 0.8 * shadowFactor;
-    return hitRecord.color * lighting;
-}
-
-// ===== REFLEXION =====
-
-fn reflect(incident: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
-    return incident - 2.0 * dot(incident, normal) * normal;
-}
-
-// ===== FRESNEL =====
-
-fn fresnelSchlick(cosTheta: f32, metallic: f32) -> f32 {
-    let F0 = mix(0.04, 1.0, metallic);
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+    let lighting = ambient + diffuse * 0.8;
+    return color * lighting;
 }
 
 // ===== HINTERGRUND =====
@@ -303,63 +295,6 @@ fn fresnelSchlick(cosTheta: f32, metallic: f32) -> f32 {
 fn getBackgroundColor(direction: vec3<f32>) -> vec3<f32> {
     let t = 0.5 * (direction.y + 1.0);
     return mix(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.5, 0.7, 1.0), t);
-}
-
-// ===== RAYTRACING MIT REFLEXIONEN =====
-
-fn traceRay(initialRay: Ray) -> vec3<f32> {
-    var ray = initialRay;
-    var finalColor = vec3<f32>(0.0);
-    var throughput = vec3<f32>(1.0);
-    
-    let maxBounces = i32(sceneConfig.maxBounces);
-    let reflectionsEnabled = sceneConfig.reflectionsEnabled > 0.5;
-    
-    for (var bounce = 0; bounce < maxBounces; bounce++) {
-        let hit = findClosestHit(ray);
-        
-        if (!hit.hit) {
-            finalColor += throughput * getBackgroundColor(ray.direction);
-            break;
-        }
-        
-        let viewDir = normalize(ray.origin - hit.point);
-        let cosTheta = max(dot(viewDir, hit.normal), 0.0);
-        let fresnel = fresnelSchlick(cosTheta, hit.metallic);
-        let diffuseAmount = (1.0 - hit.metallic) * (1.0 - fresnel);
-        
-        if (diffuseAmount > 0.01) {
-            let lighting = calculateLighting(hit);
-            finalColor += throughput * lighting * diffuseAmount;
-        }
-        
-        if (!reflectionsEnabled || hit.metallic < 0.01) {
-            break;
-        }
-        
-        let reflectionStrength = fresnel * hit.metallic;
-        if (reflectionStrength < sceneConfig.minContribution) {
-            break;
-        }
-        
-        let reflectedDir = reflect(-viewDir, hit.normal);
-        ray.origin = hit.point + hit.normal * EPSILON;
-        ray.direction = normalize(reflectedDir);
-
-        if (hit.metallic > 0.9) {
-            let tint = mix(hit.color, vec3<f32>(1.0), 0.8);
-            throughput *= tint * reflectionStrength;
-        } else {
-            let colorTint = mix(vec3<f32>(1.0), hit.color, 1.0 - hit.metallic);
-            throughput *= colorTint * reflectionStrength;
-        }
-        
-        if (max(max(throughput.r, throughput.g), throughput.b) < sceneConfig.minContribution) {
-            break;
-        }
-    }
-    
-    return finalColor;
 }
 
 // ===== GAMMA CORRECTION =====
@@ -379,36 +314,65 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         return;
     }
     
-    // Cache nutzen wenn valid (KEIN setCachedColor vorher!)
+    var finalColor: vec3<f32>;
+    
     if (isCacheValid(pixelCoords)) {
-        let cachedColor = getCachedColor(pixelCoords);
-        textureStore(outputTexture, pixelCoords, cachedColor);
-        return;
+        // ===== CACHE-HIT: Nur Lighting berechnen =====
+        let cached = getCachedGeometry(pixelCoords);
+        
+        if (cached.sphereIndex == CACHE_BACKGROUND) {
+            // Background: Keine Geometrie, direkte Farbe
+            let uv = vec2<f32>(
+                f32(pixelCoords.x) / f32(dimensions.x),
+                f32(pixelCoords.y) / f32(dimensions.y)
+            );
+            finalColor = getBackgroundColor(getCameraRay(uv));
+            
+        } else if (cached.sphereIndex == CACHE_GROUND) {
+            // Ground: Verwende gecachte Hit-Point und Normal
+            let normal = vec3<f32>(0.0, 1.0, 0.0);
+            let groundColor = vec3<f32>(0.6, 0.6, 0.6);
+            finalColor = calculateLighting(cached.hitPoint, normal, groundColor);
+            
+        } else {
+            // Sphere: Verwende gecachte Hit-Point, berechne nur Normal und Lighting
+            let sphereIndex = u32(cached.sphereIndex);
+            let sphere = spheres[sphereIndex];
+            let normal = normalize(cached.hitPoint - sphere.center);
+            finalColor = calculateLighting(cached.hitPoint, normal, sphere.color);
+        }
+        
+    } else {
+        // ===== CACHE-MISS: Vollständige Berechnung =====
+        let uv = vec2<f32>(
+            f32(pixelCoords.x) / f32(dimensions.x),
+            f32(pixelCoords.y) / f32(dimensions.y)
+        );
+        
+        var ray: Ray;
+        ray.origin = camera.position;
+        ray.direction = getCameraRay(uv);
+        
+        let hit = findClosestHit(ray);
+        
+        if (hit.hit) {
+            if (hit.material == GROUND_MATERIAL_ID) {
+                // Ground Hit
+                setCachedGeometry(pixelCoords, CACHE_GROUND, hit.t, hit.point);
+                finalColor = calculateLighting(hit.point, hit.normal, hit.color);
+            } else {
+                // Sphere Hit
+                setCachedGeometry(pixelCoords, f32(hit.material), hit.t, hit.point);
+                finalColor = calculateLighting(hit.point, hit.normal, hit.color);
+            }
+        } else {
+            // Background Hit
+            setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0));
+            finalColor = getBackgroundColor(ray.direction);
+        }
     }
-
-    // Raytracing nur bei Cache-Miss
-    var seed = u32(pixelCoords.x) + u32(pixelCoords.y) * renderInfo.width;
-    seed += u32(camera.randomSeed1 * 1000000.0);
-    seed = pcgHash(seed);
-
-    let baseUV = vec2<f32>(
-        f32(pixelCoords.x) / f32(dimensions.x),
-        f32(pixelCoords.y) / f32(dimensions.y)
-    );
     
-    let jitter = randomFloat2(&seed);
-    let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
-    let uv = baseUV + (jitter - 0.5) * pixelSize;
-    
-    var ray: Ray;
-    ray.origin = camera.position;
-    ray.direction = getCameraRay(uv);
-    
-    let sampleColor = traceRay(ray);
-    let finalColor = linearToSrgb(sampleColor);
-    
-    // Cache schreiben (NUR nach Raytracing!)
-    setCachedColor(pixelCoords, vec4<f32>(finalColor, 1.0));
-    
-    textureStore(outputTexture, pixelCoords, vec4<f32>(finalColor, 1.0));
+    // Gamma correction und output
+    let gammaCorrected = linearToSrgb(finalColor);
+    textureStore(outputTexture, pixelCoords, vec4<f32>(gammaCorrected, 1.0));
 }
