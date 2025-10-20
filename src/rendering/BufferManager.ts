@@ -1,6 +1,9 @@
-import { BUFFER_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG, GEOMETRY_CACHE } from "../utils/Constants";
+// src/rendering/BufferManager.ts - Erweitert um intelligente Cache-Invalidierung
+
+import { BUFFER_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG } from "../utils/Constants";
 import { Logger } from "../utils/Logger";
 import { Scene } from "../scene/Scene";
+import { CacheInvalidationManager } from "../cache/CacheInvalidationManager";
 
 export class BufferManager {
     private device: GPUDevice | null = null;
@@ -22,8 +25,11 @@ export class BufferManager {
     private canvasWidth: number = 0;
     private canvasHeight: number = 0;
 
-    // ===== CACHE-INVALIDIERUNG TRACKING =====
-    private invalidationStats = {
+    // ===== INTELLIGENTE CACHE-INVALIDIERUNG =====
+    private cacheInvalidationManager: CacheInvalidationManager | null = null;
+
+    // ===== LEGACY STATS (für Rückwärtskompatibilität) =====
+    private legacyInvalidationStats = {
         totalInvalidations: 0,
         pixelsInvalidated: 0,
         lastInvalidationTime: 0
@@ -62,18 +68,37 @@ export class BufferManager {
         this.createAccumulationBuffer(canvasWidth, canvasHeight);
         this.createSceneConfigBuffer(lightPosition, ambientIntensity);
 
+        // Intelligente Cache-Invalidierung initialisieren
+        this.initializeCacheInvalidation();
+
         this.logger.success('Alle GPU-Buffers erfolgreich erstellt');
     }
 
     /**
-     * Kamera-Buffer erstellen
+     * Intelligente Cache-Invalidierung initialisieren
      */
+    private initializeCacheInvalidation(): void {
+        if (!this.device || !this.cacheBuffer) {
+            this.logger.warning('Kann intelligente Cache-Invalidierung nicht initialisieren');
+            return;
+        }
+
+        this.cacheInvalidationManager = new CacheInvalidationManager(
+            this.device,
+            this.cacheBuffer,
+            this.canvasWidth,
+            this.canvasHeight
+        );
+
+        this.logger.cache('Intelligente Cache-Invalidierung aktiviert');
+    }
+
+    // ===== BESTEHENDE BUFFER-ERSTELLUNG (unverändert) =====
+
     private createCameraBuffer(): void {
         if (!this.device || !this.cameraData) {
             throw new Error('Device oder Kamera-Daten nicht verfügbar');
         }
-
-        this.logger.buffer('Erstelle Kamera-Buffer...');
 
         this.cameraBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.CAMERA.LABEL,
@@ -89,19 +114,13 @@ export class BufferManager {
         extendedData[11] = 0; // padding
 
         this.device.queue.writeBuffer(this.cameraBuffer, 0, extendedData);
-
         this.logger.success(`Kamera-Buffer erstellt: ${BUFFER_CONFIG.CAMERA.SIZE} bytes`);
     }
 
-    /**
-     * Spheres-Buffer erstellen
-     */
     private createSpheresBuffer(): void {
         if (!this.device || !this.spheresData) {
             throw new Error('Device oder Kugel-Daten nicht verfügbar');
         }
-
-        this.logger.buffer('Erstelle Spheres-Buffer...');
 
         this.spheresBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.SPHERE.LABEL,
@@ -115,15 +134,10 @@ export class BufferManager {
         this.logger.success(`Spheres-Buffer erstellt: ${BUFFER_CONFIG.SPHERES.SIZE} bytes für ${sphereCount} Kugeln`);
     }
 
-    /**
-     * Render-Info-Buffer erstellen
-     */
     private createRenderInfoBuffer(width: number, height: number, sphereCount: number): void {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
         }
-
-        this.logger.buffer('Erstelle Render-Info-Buffer...');
 
         this.renderInfoBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.RENDER_INFO.LABEL,
@@ -131,30 +145,18 @@ export class BufferManager {
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        const renderInfoData = new Uint32Array([
-            width,
-            height,
-            sphereCount,
-            0
-        ]);
-
+        const renderInfoData = new Uint32Array([width, height, sphereCount, 0]);
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
-
         this.logger.success(`Render-Info-Buffer erstellt: ${sphereCount} Kugeln`);
     }
 
-    /**
-     * EINFACHER Cache-Buffer erstellen (1 uint32 pro Pixel)
-     */
     private createCacheBuffer(width: number, height: number): void {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
         }
 
-        this.logger.cache('Erstelle optimalen Geometry-Cache (6 float32/pixel)...');
-
         const pixelCount = width * height;
-        const bufferSize = calculateCacheBufferSize(width, height); // 24 bytes pro Pixel
+        const bufferSize = calculateCacheBufferSize(width, height);
 
         this.cacheBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.CACHE.LABEL,
@@ -162,22 +164,16 @@ export class BufferManager {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
         });
 
-        // Cache mit Float32Array initialisieren (alle 0.0 = invalid)
         const cacheData = new Float32Array(pixelCount * 6).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
         this.logger.success(`Optimaler Cache erstellt: ${bufferSize.toLocaleString()} bytes (${pixelCount.toLocaleString()} * 6 float32)`);
     }
 
-    /**
-     * Accumulation-Buffer erstellen
-     */
     private createAccumulationBuffer(width: number, height: number): void {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
         }
-
-        this.logger.buffer('Erstelle Accumulation-Buffer für Supersampling...');
 
         const pixelCount = width * height;
         const bufferSize = calculateAccumulationBufferSize(width, height);
@@ -194,9 +190,6 @@ export class BufferManager {
         this.logger.success(`Accumulation-Buffer erstellt: ${bufferSize.toLocaleString()} bytes`);
     }
 
-    /**
-     * Scene Config Buffer erstellen
-     */
     private createSceneConfigBuffer(
         lightPosition?: { x: number; y: number; z: number },
         ambientIntensity?: number
@@ -204,8 +197,6 @@ export class BufferManager {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
         }
-
-        this.logger.buffer('Erstelle Scene Config Buffer...');
 
         this.sceneConfigBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.SCENE_CONFIG.LABEL,
@@ -217,11 +208,8 @@ export class BufferManager {
         const ambient = ambientIntensity !== undefined ? ambientIntensity : SCENE_CONFIG.LIGHTING.AMBIENT;
 
         const sceneConfigData = new Float32Array([
-            SCENE_CONFIG.GROUND.Y_POSITION,
-            0, 0, 0,
-            lightPos.x,
-            lightPos.y,
-            lightPos.z,
+            SCENE_CONFIG.GROUND.Y_POSITION, 0, 0, 0,
+            lightPos.x, lightPos.y, lightPos.z,
             SCENE_CONFIG.LIGHTING.SHADOW_ENABLED ? 1.0 : 0.0,
             SCENE_CONFIG.REFLECTIONS.ENABLED ? 1.0 : 0.0,
             SCENE_CONFIG.REFLECTIONS.MAX_BOUNCES,
@@ -230,141 +218,53 @@ export class BufferManager {
         ]);
 
         this.device.queue.writeBuffer(this.sceneConfigBuffer, 0, sceneConfigData);
-
         this.logger.success(`Scene Config Buffer erstellt: ${BUFFER_CONFIG.SCENE_CONFIG.SIZE} bytes`);
     }
 
-    // ===== CACHE-INVALIDIERUNG METHODEN =====
+    // ===== NEUE INTELLIGENTE CACHE-INVALIDIERUNG API =====
 
     /**
-     * Effiziente Batch-Invalidierung für bewegte Objekte
+     * Intelligente Cache-Invalidierung basierend auf Scene-Änderungen
      */
-    public invalidatePixelsForSphere(sphereIndex: number): void {
-        if (!this.device || !this.cacheBuffer) {
-            throw new Error('Device oder Cache-Buffer nicht verfügbar');
+    public async invalidateForSceneChanges(scene: Scene): Promise<void> {
+        if (!this.cacheInvalidationManager) {
+            // Fallback auf legacy Random-Invalidierung
+            await this.legacyRandomInvalidation();
+            return;
         }
 
-        const startTime = performance.now();
-        const totalPixels = this.canvasWidth * this.canvasHeight;
-        const pixelsToInvalidate = Math.floor(totalPixels * 0.1); // 10%
+        const spheresData = scene.getSpheresData();
+        const cameraData = scene.getCameraData();
 
-        // Batch-Invalidierung: Zufällige Pixel invalidieren
-        const invalidPixels = new Set<number>();
-        while (invalidPixels.size < pixelsToInvalidate) {
-            invalidPixels.add(Math.floor(Math.random() * totalPixels));
-        }
+        try {
+            const result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
 
-        // Effiziente Batch-Schreibung für 6 float32 Struktur
-        const pixelArray = Array.from(invalidPixels);
-        const batchSize = Math.min(100, pixelArray.length);
+            // Legacy Stats für Rückwärtskompatibilität aktualisieren
+            this.legacyInvalidationStats.totalInvalidations++;
+            this.legacyInvalidationStats.pixelsInvalidated += result.pixelsInvalidated;
+            this.legacyInvalidationStats.lastInvalidationTime = result.invalidationTime;
 
-        for (let i = 0; i < pixelArray.length; i += batchSize) {
-            const batch = pixelArray.slice(i, i + batchSize);
-
-            batch.forEach(pixelIndex => {
-                // Nur das Valid-Flag (Index 5) auf 0.0 setzen
-                const validFlagOffset = pixelIndex * 6 * 4 + 5 * 4; // 6 float32 pro pixel, valid flag ist index 5
-                this.device!.queue.writeBuffer(
-                    this.cacheBuffer!,
-                    validFlagOffset,
-                    new Float32Array([0.0]) // Invalid flag
+            // DEBUG-LOG für die Korrektur
+            if (result.pixelsInvalidated > 0) {
+                const invalidationType = result.cameraInvalidation ? 'Kamera' : 'Objekt';
+                this.logger.cache(
+                    `Intelligente Invalidierung: ${invalidationType}-Bewegung, ` +
+                    `${result.pixelsInvalidated.toLocaleString()} Pixel in ${result.invalidationTime.toFixed(2)}ms`
                 );
-            });
-        }
-
-        const invalidationTime = performance.now() - startTime;
-
-        // Statistiken aktualisieren
-        this.invalidationStats.totalInvalidations++;
-        this.invalidationStats.pixelsInvalidated += pixelsToInvalidate;
-        this.invalidationStats.lastInvalidationTime = invalidationTime;
-
-        this.logger.cache(
-            `Batch-Invalidierung (6f32): ${pixelsToInvalidate} Pixel in ${invalidationTime.toFixed(2)}ms ` +
-            `(Sphere ${sphereIndex})`
-        );
-    }
-
-    /**
-     * Region-basierte Invalidierung (für zukünftige intelligente Invalidierung)
-     */
-    public invalidateRegion(centerX: number, centerY: number, radius: number): void {
-        if (!this.device || !this.cacheBuffer) {
-            throw new Error('Device oder Cache-Buffer nicht verfügbar');
-        }
-
-        const startTime = performance.now();
-        const invalidPixels: number[] = [];
-
-        // Alle Pixel in einem Kreis um die Position invalidieren
-        const minX = Math.max(0, Math.floor(centerX - radius));
-        const maxX = Math.min(this.canvasWidth - 1, Math.ceil(centerX + radius));
-        const minY = Math.max(0, Math.floor(centerY - radius));
-        const maxY = Math.min(this.canvasHeight - 1, Math.ceil(centerY + radius));
-
-        for (let y = minY; y <= maxY; y++) {
-            for (let x = minX; x <= maxX; x++) {
-                const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-                if (distance <= radius) {
-                    const pixelIndex = y * this.canvasWidth + x;
-                    invalidPixels.push(pixelIndex);
-                }
             }
+
+        } catch (error) {
+            this.logger.error('Intelligente Cache-Invalidierung fehlgeschlagen:', error);
+            await this.legacyRandomInvalidation();
         }
-
-        // Batch-Invalidierung für die Region (6 float32 Struktur)
-        const batchSize = 50;
-        for (let i = 0; i < invalidPixels.length; i += batchSize) {
-            const batch = invalidPixels.slice(i, i + batchSize);
-
-            batch.forEach(pixelIndex => {
-                // Nur das Valid-Flag (Index 5) auf 0.0 setzen
-                const validFlagOffset = pixelIndex * 6 * 4 + 5 * 4;
-                this.device!.queue.writeBuffer(
-                    this.cacheBuffer!,
-                    validFlagOffset,
-                    new Float32Array([0.0])
-                );
-            });
-        }
-
-        const invalidationTime = performance.now() - startTime;
-
-        this.invalidationStats.totalInvalidations++;
-        this.invalidationStats.pixelsInvalidated += invalidPixels.length;
-        this.invalidationStats.lastInvalidationTime = invalidationTime;
-
-        this.logger.cache(
-            `Region-Invalidierung (6f32): ${invalidPixels.length} Pixel in ${invalidationTime.toFixed(2)}ms ` +
-            `(${centerX}, ${centerY}, r=${radius})`
-        );
     }
 
     /**
-     * Intelligentere Invalidierung basierend auf Sphere-Position und -Bewegung
+     * Legacy Random-Invalidierung als Fallback
      */
-    public invalidatePixelsForSphereMovement(
-        sphereIndex: number,
-        oldPosition: { x: number; y: number; z: number },
-        newPosition: { x: number; y: number; z: number },
-        radius: number
-    ): void {
-        if (!this.device || !this.cacheBuffer) {
-            throw new Error('Device oder Cache-Buffer nicht verfügbar');
-        }
-
-        // Für jetzt: Prozentuale Invalidierung basierend auf Bewegungsdistanz
-        const movementDistance = Math.sqrt(
-            Math.pow(newPosition.x - oldPosition.x, 2) +
-            Math.pow(newPosition.y - oldPosition.y, 2) +
-            Math.pow(newPosition.z - oldPosition.z, 2)
-        );
-
-        // Je größer die Bewegung, desto mehr Pixel invalidieren
-        const invalidationPercentage = Math.min(0.5, Math.max(0.02, movementDistance * 0.05));
-
+    private async legacyRandomInvalidation(): Promise<void> {
         const totalPixels = this.canvasWidth * this.canvasHeight;
-        const pixelsToInvalidate = Math.floor(totalPixels * invalidationPercentage);
+        const pixelsToInvalidate = Math.floor(totalPixels * 0.05); // 5% statt 10%
 
         const invalidPixels = new Set<number>();
         while (invalidPixels.size < pixelsToInvalidate) {
@@ -372,56 +272,113 @@ export class BufferManager {
         }
 
         invalidPixels.forEach(pixelIndex => {
-            const offset = pixelIndex * 4;
+            const validFlagOffset = pixelIndex * 6 * 4 + 5 * 4;
             this.device!.queue.writeBuffer(
                 this.cacheBuffer!,
-                offset,
-                new Uint32Array([GEOMETRY_CACHE.INVALID_VALUE])
+                validFlagOffset,
+                new Float32Array([0.0])
             );
         });
 
-        this.logger.cache(
-            `Bewegungs-Invalidierung: ${movementDistance.toFixed(3)} Distanz -> ` +
-            `${(invalidationPercentage * 100).toFixed(1)}% Pixel (${pixelsToInvalidate})`
-        );
+        this.legacyInvalidationStats.totalInvalidations++;
+        this.legacyInvalidationStats.pixelsInvalidated += pixelsToInvalidate;
+
+        this.logger.cache(`Fallback Random-Invalidierung: ${pixelsToInvalidate} Pixel (5%)`);
     }
 
-    // ===== INVALIDIERUNG STATISTIKEN =====
+    // ===== LEGACY CACHE-INVALIDIERUNG (für Rückwärtskompatibilität) =====
+
+    /**
+     * @deprecated Verwende invalidateForSceneChanges() stattdessen
+     */
+    public invalidatePixelsForSphere(sphereIndex: number): void {
+        this.logger.warning('Legacy invalidatePixelsForSphere() verwendet - migriere zu invalidateForSceneChanges()');
+
+        // Vereinfachte Legacy-Implementierung
+        const totalPixels = this.canvasWidth * this.canvasHeight;
+        const pixelsToInvalidate = Math.floor(totalPixels * 0.02); // 2% pro Sphere
+
+        const invalidPixels = new Set<number>();
+        while (invalidPixels.size < pixelsToInvalidate) {
+            invalidPixels.add(Math.floor(Math.random() * totalPixels));
+        }
+
+        invalidPixels.forEach(pixelIndex => {
+            const validFlagOffset = pixelIndex * 6 * 4 + 5 * 4;
+            this.device!.queue.writeBuffer(
+                this.cacheBuffer!,
+                validFlagOffset,
+                new Float32Array([0.0])
+            );
+        });
+    }
+
+    // ===== CACHE-STATISTIKEN API =====
 
     /**
      * Cache-Invalidierung Statistiken abrufen
      */
-    public getInvalidationStats(): {
-        totalInvalidations: number;
-        pixelsInvalidated: number;
-        lastInvalidationTime: number;
-        avgPixelsPerInvalidation: number;
-    } {
-        return {
-            ...this.invalidationStats,
-            avgPixelsPerInvalidation: this.invalidationStats.totalInvalidations > 0
-                ? this.invalidationStats.pixelsInvalidated / this.invalidationStats.totalInvalidations
-                : 0
-        };
+    public getInvalidationStats() {
+        if (this.cacheInvalidationManager) {
+            // Neue detaillierte Statistiken
+            return this.cacheInvalidationManager.getStats();
+        } else {
+            // Legacy Statistiken
+            return {
+                totalInvalidations: this.legacyInvalidationStats.totalInvalidations,
+                pixelsInvalidated: this.legacyInvalidationStats.pixelsInvalidated,
+                lastInvalidationTime: this.legacyInvalidationStats.lastInvalidationTime,
+                avgPixelsPerInvalidation: this.legacyInvalidationStats.totalInvalidations > 0
+                    ? this.legacyInvalidationStats.pixelsInvalidated / this.legacyInvalidationStats.totalInvalidations
+                    : 0
+            };
+        }
     }
 
     /**
-     * Invalidierung-Statistiken zurücksetzen
+     * Detaillierte Cache-Invalidierung Statistiken ausgeben
+     */
+    public logInvalidationStats(): void {
+        if (this.cacheInvalidationManager) {
+            this.cacheInvalidationManager.getStats();
+            // Die InvalidationStats-Klasse hat ihre eigene logDetailedStats() Methode
+            console.log('Verwende cacheInvalidationManager.getStats() für detaillierte Statistiken');
+        } else {
+            const stats = this.legacyInvalidationStats;
+            const totalPixels = this.canvasWidth * this.canvasHeight;
+            const avgPercentage = stats.totalInvalidations > 0
+                ? (stats.pixelsInvalidated / stats.totalInvalidations / totalPixels) * 100
+                : 0;
+
+            console.log('\n=== LEGACY CACHE-INVALIDIERUNG STATISTIKEN ===');
+            console.log(`Invalidierungen: ${stats.totalInvalidations}`);
+            console.log(`Pixel invalidiert: ${stats.pixelsInvalidated.toLocaleString()}`);
+            console.log(`Ø Pixel/Invalidierung: ${(stats.pixelsInvalidated / Math.max(1, stats.totalInvalidations)).toFixed(0)}`);
+            console.log(`Ø Prozent/Invalidierung: ${avgPercentage.toFixed(2)}%`);
+            console.log(`Letzte Zeit: ${stats.lastInvalidationTime.toFixed(2)}ms`);
+            console.log('===============================================');
+        }
+    }
+
+    /**
+     * Cache-Invalidierung Statistiken zurücksetzen
      */
     public resetInvalidationStats(): void {
-        this.invalidationStats = {
+        if (this.cacheInvalidationManager) {
+            this.cacheInvalidationManager.resetStats();
+        }
+
+        this.legacyInvalidationStats = {
             totalInvalidations: 0,
             pixelsInvalidated: 0,
             lastInvalidationTime: 0
         };
-        this.logger.cache('Invalidierung-Statistiken zurückgesetzt');
+
+        this.logger.cache('Cache-Invalidierung Statistiken zurückgesetzt');
     }
 
-    // ===== UPDATE METHODEN =====
+    // ===== UPDATE METHODEN (unverändert) =====
 
-    /**
-     * Spheres-Daten aus Three.js Scene aktualisieren
-     */
     public updateSpheresFromScene(scene: Scene): void {
         if (!this.device || !this.spheresBuffer) {
             throw new Error('Device oder Spheres-Buffer nicht verfügbar');
@@ -436,28 +393,6 @@ export class BufferManager {
         this.logger.buffer(`Spheres aus Scene aktualisiert (${scene.getSphereCount()} Kugeln)`);
     }
 
-    /**
-     * Render Info aktualisieren
-     */
-    public updateRenderInfo(width: number, height: number, sphereCount: number): void {
-        if (!this.device || !this.renderInfoBuffer) {
-            throw new Error('Device oder Render Info Buffer nicht verfügbar');
-        }
-
-        const renderInfoData = new Uint32Array([
-            width,
-            height,
-            sphereCount,
-            0
-        ]);
-
-        this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
-        this.logger.buffer(`Render Info aktualisiert: ${sphereCount} Kugeln`);
-    }
-
-    /**
-     * Kamera-Daten aktualisieren
-     */
     public updateCameraData(newCameraData: Float32Array): void {
         if (!this.device || !this.cameraBuffer) {
             throw new Error('Device oder Kamera-Buffer nicht verfügbar');
@@ -476,9 +411,6 @@ export class BufferManager {
         this.logger.buffer('Kamera-Daten aktualisiert');
     }
 
-    /**
-     * Kamera-Daten mit Random Seeds aktualisieren (für Supersampling)
-     */
     public updateCameraDataWithRandomSeeds(
         baseCameraData: Float32Array,
         sampleCount: number
@@ -497,9 +429,22 @@ export class BufferManager {
         this.device.queue.writeBuffer(this.cameraBuffer, 0, extendedData);
     }
 
-    /**
-     * Scene Config aktualisieren
-     */
+    public updateRenderInfo(width: number, height: number, sphereCount: number): void {
+        if (!this.device || !this.renderInfoBuffer) {
+            throw new Error('Device oder Render Info Buffer nicht verfügbar');
+        }
+
+        const renderInfoData = new Uint32Array([
+            width,
+            height,
+            sphereCount,
+            0
+        ]);
+
+        this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
+        this.logger.buffer(`Render Info aktualisiert: ${sphereCount} Kugeln`);
+    }
+
     public updateSceneConfig(
         lightPosition?: { x: number; y: number; z: number },
         ambientIntensity?: number,
@@ -532,26 +477,22 @@ export class BufferManager {
         this.logger.buffer('Scene Config aktualisiert');
     }
 
+    // ... weitere Update-Methoden bleiben unverändert
+
     // ===== CACHE RESET METHODEN =====
 
-    /**
-     * Cache zurücksetzen (einfache Struktur)
-     */
     public resetCache(width: number, height: number): void {
         if (!this.device || !this.cacheBuffer) {
             throw new Error('Device oder Cache-Buffer nicht verfügbar');
         }
 
         const pixelCount = width * height;
-        const cacheData = new Float32Array(pixelCount * 6).fill(0.0); // Alle Werte auf 0.0 (invalid)
+        const cacheData = new Float32Array(pixelCount * 6).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
         this.logger.cache('Optimaler Cache zurückgesetzt (6 float32/pixel)');
     }
 
-    /**
-     * Accumulation Buffer zurücksetzen
-     */
     public resetAccumulation(width: number, height: number): void {
         if (!this.device || !this.accumulationBuffer) {
             throw new Error('Device oder Accumulation-Buffer nicht verfügbar');
@@ -564,11 +505,8 @@ export class BufferManager {
         this.logger.buffer('Accumulation Buffer zurückgesetzt');
     }
 
-    // ===== GETTER METHODEN =====
+    // ===== GETTER METHODEN (unverändert) =====
 
-    /**
-     * Alle Buffers für Bind Group abrufen
-     */
     public getAllBuffers(): {
         camera: GPUBuffer;
         spheres: GPUBuffer;
@@ -592,13 +530,6 @@ export class BufferManager {
         };
     }
 
-    public getSpheresBuffer(): GPUBuffer {
-        if (!this.spheresBuffer) {
-            throw new Error('Spheres-Buffer nicht initialisiert');
-        }
-        return this.spheresBuffer;
-    }
-
     public getCacheBuffer(): GPUBuffer {
         if (!this.cacheBuffer) {
             throw new Error('Cache-Buffer nicht initialisiert');
@@ -620,9 +551,9 @@ export class BufferManager {
         return this.cameraBuffer;
     }
 
-    public getSphereBuffer(): GPUBuffer {
+    public getSpheresBuffer(): GPUBuffer {
         if (!this.spheresBuffer) {
-            throw new Error('Kugel-Buffer nicht initialisiert');
+            throw new Error('Spheres-Buffer nicht initialisiert');
         }
         return this.spheresBuffer;
     }
@@ -641,9 +572,6 @@ export class BufferManager {
         return this.sceneConfigBuffer;
     }
 
-    /**
-     * Initialisierungs-Status prüfen
-     */
     public isInitialized(): boolean {
         return this.cameraBuffer !== null &&
             this.spheresBuffer !== null &&
@@ -653,10 +581,12 @@ export class BufferManager {
             this.sceneConfigBuffer !== null;
     }
 
-    /**
-     * Alle Buffers aufräumen
-     */
     public cleanup(): void {
+        if (this.cacheInvalidationManager) {
+            this.cacheInvalidationManager.cleanup();
+            this.cacheInvalidationManager = null;
+        }
+
         if (this.cameraBuffer) {
             this.cameraBuffer.destroy();
             this.cameraBuffer = null;

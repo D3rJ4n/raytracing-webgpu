@@ -72,32 +72,48 @@ export class PixelCache {
         }
     }
 
-    // REPARIERT: Statistiken für optimalen Cache (6 float32 pro Pixel)
     private calculateStatistics(cacheData: Float32Array): void {
         let hits = 0;
         let misses = 0;
 
+        // Korrekte Berechnung für 6 float32 pro Pixel
         for (let i = 0; i < this.stats.totalPixels; i++) {
             const baseIndex = i * 6; // 6 float32 pro Pixel
+
+            // WICHTIG: Sicherheitsprüfung für Buffer-Grenzen
+            if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
+                misses++; // Wenn außerhalb des Buffers, dann Miss
+                continue;
+            }
+
             const validFlag = cacheData[baseIndex + GEOMETRY_CACHE.VALID_FLAG];
 
+            // KORRIGIERT: 1.0 = valid (Hit), 0.0 = invalid (Miss)
             if (validFlag === 1.0) {
-                hits++; // 1.0 = valid
+                hits++;
             } else {
-                misses++; // 0.0 = invalid
+                misses++;
             }
         }
 
+        // Statistiken setzen
         this.stats.cacheHits = hits;
         this.stats.cacheMisses = misses;
 
-        // Debug-Info für die ersten paar Pixel
+        // Debug-Info mit Sicherheitsprüfungen
         if (this.stats.totalPixels > 0) {
             const sampleSize = Math.min(5, this.stats.totalPixels);
             const sampleInfo: string[] = [];
 
             for (let i = 0; i < sampleSize; i++) {
                 const baseIndex = i * 6;
+
+                // NEUE Sicherheitsprüfung
+                if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
+                    sampleInfo.push('OUT_OF_BOUNDS');
+                    continue;
+                }
+
                 const sphereIndex = cacheData[baseIndex + GEOMETRY_CACHE.SPHERE_INDEX];
                 const valid = cacheData[baseIndex + GEOMETRY_CACHE.VALID_FLAG];
 

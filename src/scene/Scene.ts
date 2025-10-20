@@ -128,23 +128,56 @@ export class Scene {
         this.logger.success(`Rechteck-Szene aufgebaut: ${sphereCount} Kugeln (${cols}x${rows}), ${this.lights.length} Lights`);
     }
 
+    public forceMovementCheck(): number[] {
+        this.logger.info('Forcing movement check...');
+        const moved = this.trackMovements();
+
+        if (moved.length > 0) {
+            this.logger.info(`Found ${moved.length} moved spheres: ${moved.join(', ')}`);
+        } else {
+            this.logger.info('No movements detected');
+        }
+
+        return moved;
+    }
+
     // Bewegungs-Tracking Methoden
     public trackMovements(): number[] {
         const moved: number[] = [];
+        const movementThreshold = 0.001; // Minimum distance to count as movement
 
         this.meshes.forEach((mesh, index) => {
             const currentPos = mesh.position.clone();
             const lastPos = this.lastSpherePositions.get(index);
 
-            if (!lastPos || !currentPos.equals(lastPos)) {
-                moved.push(index);
+            if (!lastPos) {
+                // First time tracking this sphere - store position but don't count as movement
                 this.lastSpherePositions.set(index, currentPos.clone());
-                this.movedSpheres.add(index);
+            } else {
+                // Check if sphere moved significantly
+                const distance = currentPos.distanceTo(lastPos);
+
+                if (distance > movementThreshold) {
+                    moved.push(index);
+                    this.movedSpheres.add(index);
+
+                    // Update stored position
+                    this.lastSpherePositions.set(index, currentPos.clone());
+
+                    // Debug logging for significant movements
+                    if (distance > 0.1) {
+                        this.logger.info(
+                            `Sphere ${index} moved ${distance.toFixed(3)} units: ` +
+                            `(${lastPos.x.toFixed(2)}, ${lastPos.y.toFixed(2)}, ${lastPos.z.toFixed(2)}) -> ` +
+                            `(${currentPos.x.toFixed(2)}, ${currentPos.y.toFixed(2)}, ${currentPos.z.toFixed(2)})`
+                        );
+                    }
+                }
             }
         });
 
         if (moved.length > 0) {
-            this.logger.info(`Bewegung erkannt: ${moved.length} Objekte (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? '...' : ''})`);
+            this.logger.info(`Movement detected: ${moved.length} spheres moved (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? '...' : ''})`);
         }
 
         return moved;
@@ -291,6 +324,7 @@ export class Scene {
             const metallic = material.metalness;
             const offset = index * floatsPerSphere;
 
+            //Get current world position to detect movements
             const worldPos = new THREE.Vector3();
             mesh.getWorldPosition(worldPos);
 
