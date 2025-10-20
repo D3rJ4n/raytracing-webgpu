@@ -1,7 +1,7 @@
-import { Logger } from '../utils/Logger';
-import { MovementTracker } from './MovementTracker';
-import { ScreenProjection } from './ScreenProjection';
-import { InvalidationStats } from './InvalidationStats';
+import { Logger } from '../../utils/Logger';
+import { GeometryMovementTracker } from './GeometryMovementTracker';
+import { GeometryScreenProjection } from './GeometryScreenProjection';
+import { GeometryInvalidationStats } from './GeometryInvalidationStats';
 
 export interface InvalidationResult {
     pixelsInvalidated: number;
@@ -10,16 +10,16 @@ export interface InvalidationResult {
     cameraInvalidation: boolean;
 }
 
-export class CacheInvalidationManager {
+export class GeometryInvalidationManager {
     private device: GPUDevice;
     private cacheBuffer: GPUBuffer;
     private canvasWidth: number;
     private canvasHeight: number;
     private logger: Logger;
 
-    private movementTracker: MovementTracker;
-    private screenProjection: ScreenProjection;
-    private stats: InvalidationStats;
+    private movementTracker: GeometryMovementTracker;
+    private screenProjection: GeometryScreenProjection;
+    private stats: GeometryInvalidationStats;
 
     // DEBUG: Aktiviere detailliertes Logging
     private debugMode: boolean = true;
@@ -36,9 +36,9 @@ export class CacheInvalidationManager {
         this.canvasHeight = canvasHeight;
         this.logger = Logger.getInstance();
 
-        this.movementTracker = new MovementTracker();
-        this.screenProjection = new ScreenProjection(canvasWidth, canvasHeight);
-        this.stats = new InvalidationStats();
+        this.movementTracker = new GeometryMovementTracker();
+        this.screenProjection = new GeometryScreenProjection(canvasWidth, canvasHeight);
+        this.stats = new GeometryInvalidationStats();
 
         this.logger.cache('CacheInvalidationManager initialisiert');
     }

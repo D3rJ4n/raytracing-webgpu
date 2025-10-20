@@ -3,7 +3,7 @@
 import { BUFFER_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG } from "../utils/Constants";
 import { Logger } from "../utils/Logger";
 import { Scene } from "../scene/Scene";
-import { CacheInvalidationManager } from "../cache/CacheInvalidationManager";
+import { GeometryInvalidationManager } from "../cache/geometry/GeometryInvalidationManager";
 
 export class BufferManager {
     private device: GPUDevice | null = null;
@@ -26,7 +26,7 @@ export class BufferManager {
     private canvasHeight: number = 0;
 
     // ===== INTELLIGENTE CACHE-INVALIDIERUNG =====
-    private cacheInvalidationManager: CacheInvalidationManager | null = null;
+    private cacheInvalidationManager: GeometryInvalidationManager | null = null;
 
     // ===== LEGACY STATS (für Rückwärtskompatibilität) =====
     private legacyInvalidationStats = {
@@ -83,7 +83,7 @@ export class BufferManager {
             return;
         }
 
-        this.cacheInvalidationManager = new CacheInvalidationManager(
+        this.cacheInvalidationManager = new GeometryInvalidationManager(
             this.device,
             this.cacheBuffer,
             this.canvasWidth,

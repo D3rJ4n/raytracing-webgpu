@@ -1,4 +1,4 @@
-import { Logger } from '../utils/Logger';
+import { Logger } from '../../utils/Logger';
 
 export interface InvalidationResult {
     pixelsInvalidated: number;
@@ -26,7 +26,7 @@ export interface InvalidationStatistics {
     lastInvalidationPercentage: number;
 }
 
-export class InvalidationStats {
+export class GeometryInvalidationStats {
     private logger: Logger;
     private canvasWidth: number = 800;
     private canvasHeight: number = 600;

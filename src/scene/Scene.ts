@@ -37,6 +37,9 @@ export class Scene {
     private rotationRadius: number = 20;
     private cameraHeight: number = 10;
 
+    // 🧪 NEU: Performance Test Variablen
+    private testSpheres: number[] = [];
+
     constructor() {
         this.logger = Logger.getInstance();
     }
@@ -46,7 +49,9 @@ export class Scene {
 
         this.createScene();
         this.createCamera();
-        this.setupRectangleScene();
+
+        // 🧪 AUTOMATISCH 500 KUGELN ERSTELLEN
+        this.setup500SphereGridAuto();
 
         this.logSceneInfo();
         this.logger.success('Three.js Szene erstellt');
@@ -128,56 +133,236 @@ export class Scene {
         this.logger.success(`Rechteck-Szene aufgebaut: ${sphereCount} Kugeln (${cols}x${rows}), ${this.lights.length} Lights`);
     }
 
-    public forceMovementCheck(): number[] {
-        this.logger.info('Forcing movement check...');
-        const moved = this.trackMovements();
+    // ═══════════════════════════════════════════════════════════
+    // 🧪 NEU: 500 KUGELN PERFORMANCE TEST METHODEN
+    // ═══════════════════════════════════════════════════════════
 
-        if (moved.length > 0) {
-            this.logger.info(`Found ${moved.length} moved spheres: ${moved.join(', ')}`);
-        } else {
-            this.logger.info('No movements detected');
+    /**
+     * 🔢 Erstelle 500 Kugeln Grid für Performance-Test (AUTOMATISCH)
+     */
+    private setup500SphereGridAuto(): void {
+        this.logger.info('🏗️ Erstelle automatisch 500 Kugeln Grid...');
+
+        this.clearSpheres();
+
+        // 25x20 = 500 Kugeln
+        const cols = 25;
+        const rows = 20;
+        const spacing = 1.0;
+        const baseRadius = 0.25;
+        const heightAboveGround = 0.0;
+
+        const offsetX = (cols - 1) * spacing / 2;
+        const offsetZ = (rows - 1) * spacing / 2;
+
+        let sphereCount = 0;
+
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const position = {
+                    x: col * spacing - offsetX,
+                    y: heightAboveGround,
+                    z: row * spacing - offsetZ
+                };
+
+                const color = this.get500GridColor(col, row, cols, rows);
+                const metallic = (col + row) % 4 === 0 ? 0.8 : 0.1;
+
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(baseRadius, 16, 16),
+                    new THREE.MeshStandardMaterial({
+                        color,
+                        metalness: metallic,
+                        roughness: 0.3
+                    })
+                );
+
+                sphere.position.set(position.x, position.y, position.z);
+                sphere.name = `Auto500_${row}_${col}`;
+
+                this.scene.add(sphere);
+                this.meshes.push(sphere);
+
+                // Initiale Position speichern
+                this.lastSpherePositions.set(sphereCount, sphere.position.clone());
+
+                sphereCount++;
+            }
         }
 
-        return moved;
+        // Beleuchtung hinzufügen
+        const pointLight = new THREE.PointLight(0xffffff, 1.0);
+        pointLight.position.set(10, 10, 10);
+        pointLight.name = 'Main Light';
+        this.scene.add(pointLight);
+        this.lights.push(pointLight);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, this.ambientLightIntensity);
+        ambientLight.name = 'Ambient Light';
+        this.scene.add(ambientLight);
+        this.lights.push(ambientLight);
+
+        this.logger.success(`AUTOMATISCH: 500 Kugeln Grid erstellt: ${sphereCount} Kugeln (${cols}x${rows})`);
     }
+
+    /**
+     * 🔢 Erstelle 500 Kugeln Grid für Performance-Test (MANUELL)
+     */
+    public setup500SphereGrid(): void {
+        this.logger.info('🏗️ Erstelle 500 Kugeln Grid...');
+
+        this.clearSpheres();
+
+        // 25x20 = 500 Kugeln
+        const cols = 25;
+        const rows = 20;
+        const spacing = 1.0;
+        const baseRadius = 0.25;
+        const heightAboveGround = 0.0;
+
+        const offsetX = (cols - 1) * spacing / 2;
+        const offsetZ = (rows - 1) * spacing / 2;
+
+        let sphereCount = 0;
+
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const position = {
+                    x: col * spacing - offsetX,
+                    y: heightAboveGround,
+                    z: row * spacing - offsetZ
+                };
+
+                const color = this.get500GridColor(col, row, cols, rows);
+                const metallic = (col + row) % 4 === 0 ? 0.8 : 0.1;
+
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(baseRadius, 16, 16),
+                    new THREE.MeshStandardMaterial({
+                        color,
+                        metalness: metallic,
+                        roughness: 0.3
+                    })
+                );
+
+                sphere.position.set(position.x, position.y, position.z);
+                sphere.name = `Grid500_${row}_${col}`;
+
+                this.scene.add(sphere);
+                this.meshes.push(sphere);
+
+                // Initiale Position speichern
+                this.lastSpherePositions.set(sphereCount, sphere.position.clone());
+
+                sphereCount++;
+            }
+        }
+
+        // Beleuchtung hinzufügen
+        const pointLight = new THREE.PointLight(0xffffff, 1.0);
+        pointLight.position.set(10, 10, 10);
+        pointLight.name = 'Main Light';
+        this.scene.add(pointLight);
+        this.lights.push(pointLight);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, this.ambientLightIntensity);
+        ambientLight.name = 'Ambient Light';
+        this.scene.add(ambientLight);
+        this.lights.push(ambientLight);
+
+        this.logger.success(`500 Kugeln Grid erstellt: ${sphereCount} Kugeln (${cols}x${rows})`);
+    }
+
+    /**
+     * 🎨 Farbe für 500er Grid
+     */
+    private get500GridColor(col: number, row: number, totalCols: number, totalRows: number): number {
+        // Gradient über das Grid
+        const t = (col / totalCols + row / totalRows) / 2;
+        const r = Math.floor(Math.sin(t * Math.PI * 2) * 127 + 128);
+        const g = Math.floor(Math.sin(t * Math.PI * 2 + 2) * 127 + 128);
+        const b = Math.floor(Math.sin(t * Math.PI * 2 + 4) * 127 + 128);
+        return (r << 16) | (g << 8) | b;
+    }
+
+    /**
+     * 🧪 Bewege 2 zufällige Kugeln für Performance-Test
+     */
+    public moveTwoRandomSpheres(): void {
+        if (this.meshes.length < 2) {
+            this.logger.error('⚠️ Nicht genug Kugeln für Test');
+            return;
+        }
+
+        // 2 zufällige Indizes auswählen
+        const index1 = Math.floor(Math.random() * this.meshes.length);
+        let index2 = Math.floor(Math.random() * this.meshes.length);
+
+        // Sicherstellen, dass index2 != index1
+        while (index2 === index1) {
+            index2 = Math.floor(Math.random() * this.meshes.length);
+        }
+
+        const sphere1 = this.meshes[index1];
+        const sphere2 = this.meshes[index2];
+
+        // Kugeln um +2 Y bewegen
+        sphere1.position.y += 2;
+        sphere2.position.y += 2;
+
+        // Test-Kugeln speichern für Reset
+        this.testSpheres = [index1, index2];
+
+        this.logger.info(`🔄 Test-Kugeln verschoben: ${sphere1.name} und ${sphere2.name} um +2 Y`);
+    }
+
+    /**
+     * 🔄 Test-Kugeln zurücksetzen
+     */
+    public resetTestSpheres(): void {
+        if (this.testSpheres.length === 0) {
+            this.logger.info('⚠️ Keine Test-Kugeln zu resetten');
+            return;
+        }
+
+        this.testSpheres.forEach(index => {
+            if (index < this.meshes.length) {
+                this.meshes[index].position.y -= 2;
+            }
+        });
+
+        this.logger.info(`🔄 ${this.testSpheres.length} Test-Kugeln zurückgesetzt`);
+        this.testSpheres = [];
+    }
+
+    /**
+     * 🧪 Alias für WebGPURaytracerApp Kompatibilität
+     */
+    public moveTwoSpheresUp(): void {
+        this.moveTwoRandomSpheres();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ALLE BESTEHENDEN METHODEN UNVERÄNDERT
+    // ═══════════════════════════════════════════════════════════
 
     // Bewegungs-Tracking Methoden
     public trackMovements(): number[] {
         const moved: number[] = [];
-        const movementThreshold = 0.001; // Minimum distance to count as movement
 
         this.meshes.forEach((mesh, index) => {
             const currentPos = mesh.position.clone();
             const lastPos = this.lastSpherePositions.get(index);
 
-            if (!lastPos) {
-                // First time tracking this sphere - store position but don't count as movement
+            if (!lastPos || !currentPos.equals(lastPos)) {
+                moved.push(index);
                 this.lastSpherePositions.set(index, currentPos.clone());
-            } else {
-                // Check if sphere moved significantly
-                const distance = currentPos.distanceTo(lastPos);
-
-                if (distance > movementThreshold) {
-                    moved.push(index);
-                    this.movedSpheres.add(index);
-
-                    // Update stored position
-                    this.lastSpherePositions.set(index, currentPos.clone());
-
-                    // Debug logging for significant movements
-                    if (distance > 0.1) {
-                        this.logger.info(
-                            `Sphere ${index} moved ${distance.toFixed(3)} units: ` +
-                            `(${lastPos.x.toFixed(2)}, ${lastPos.y.toFixed(2)}, ${lastPos.z.toFixed(2)}) -> ` +
-                            `(${currentPos.x.toFixed(2)}, ${currentPos.y.toFixed(2)}, ${currentPos.z.toFixed(2)})`
-                        );
-                    }
-                }
+                this.movedSpheres.add(index);
             }
         });
 
         if (moved.length > 0) {
-            this.logger.info(`Movement detected: ${moved.length} spheres moved (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? '...' : ''})`);
+            this.logger.info(`Bewegung erkannt: ${moved.length} Objekte (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? '...' : ''})`);
         }
 
         return moved;
@@ -324,7 +509,6 @@ export class Scene {
             const metallic = material.metalness;
             const offset = index * floatsPerSphere;
 
-            //Get current world position to detect movements
             const worldPos = new THREE.Vector3();
             mesh.getWorldPosition(worldPos);
 
@@ -370,6 +554,9 @@ export class Scene {
         // Tracking-Daten zurücksetzen
         this.lastSpherePositions.clear();
         this.movedSpheres.clear();
+
+        // Test-Daten zurücksetzen
+        this.testSpheres = [];
     }
 
     public updateCameraAspect(width: number, height: number): void {
@@ -464,6 +651,7 @@ export class Scene {
         // Cleanup für Tracking
         this.lastSpherePositions.clear();
         this.movedSpheres.clear();
+        this.testSpheres = [];
 
         this.logger.init('Szenen-Ressourcen aufgeräumt');
     }

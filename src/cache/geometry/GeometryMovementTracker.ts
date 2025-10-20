@@ -1,4 +1,4 @@
-import { Logger } from '../utils/Logger';
+import { Logger } from '../../utils/Logger';
 
 export interface CameraState {
     position: { x: number; y: number; z: number };
@@ -13,7 +13,7 @@ export interface SpherePosition {
     z: number;
 }
 
-export class MovementTracker {
+export class GeometryMovementTracker {
     private logger: Logger;
 
     // Kamera-Tracking

@@ -20,7 +20,7 @@ export interface CameraParams {
     aspect: number;
 }
 
-export class ScreenProjection {
+export class GeometryScreenProjection {
     private canvasWidth: number;
     private canvasHeight: number;
     private currentCamera: CameraParams | null = null;

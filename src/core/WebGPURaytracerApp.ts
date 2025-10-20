@@ -7,7 +7,7 @@ import { TextureManager } from '../rendering/TextureManager';
 import { ComputePipeline } from './ComputePipeline';
 import { RenderPipeline } from './RenderPipeline';
 import { Renderer } from '../rendering/Renderer';
-import { PixelCache } from '../cache/PixelCache';
+import { GeometryPixelCache } from '../cache/geometry/GeometryCache';
 import { StatusDisplay } from '../utils/StatusDisplay';
 import { Logger } from '../utils/Logger';
 import { PerformanceMonitor } from '../utils/PerformanceMonitor';
@@ -24,7 +24,7 @@ export class WebGPURaytracerApp {
     private computePipeline: ComputePipeline;
     private renderPipeline: RenderPipeline;
     private renderer: Renderer;
-    private pixelCache: PixelCache;
+    private pixelCache: GeometryPixelCache;
     private performanceMonitor: PerformanceMonitor;
 
     private currentSample: number = 0;
@@ -63,7 +63,7 @@ export class WebGPURaytracerApp {
         this.computePipeline = new ComputePipeline();
         this.renderPipeline = new RenderPipeline();
         this.renderer = new Renderer();
-        this.pixelCache = new PixelCache();
+        this.pixelCache = new GeometryPixelCache();
     }
 
     public async initialize(): Promise<void> {

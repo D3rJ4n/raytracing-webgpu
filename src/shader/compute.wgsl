@@ -1,5 +1,3 @@
-// src/shader/compute.wgsl - Kompletter Compute Shader mit intelligenter Cache-Invalidierung
-
 // ===== STRUKTUREN =====
 
 struct Camera {
@@ -55,6 +53,7 @@ struct Ray {
     direction: vec3<f32>,
 }
 
+// Neue Struktur für gecachte Geometrie-Daten
 struct CachedGeometry {
     valid: bool,
     sphereIndex: f32,
@@ -68,7 +67,7 @@ struct CachedGeometry {
 @group(0) @binding(1) var<storage, read> spheres: array<SphereData>; 
 @group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
 @group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>;
+@group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>; // Jetzt float32 Array
 @group(0) @binding(5) var<storage, read_write> accumulationBuffer: array<f32>;
 @group(0) @binding(6) var<uniform> sceneConfig: SceneConfig;
 
@@ -79,7 +78,7 @@ const PI: f32 = 3.14159265359;
 const EPSILON: f32 = 0.001;
 
 // Material-IDs
-const GROUND_MATERIAL_ID: u32 = 999u;
+const GROUND_MATERIAL_ID: u32 = 999u;  // Außerhalb des Sphere-Bereichs (0-624)
 
 // CACHE-LAYOUT (6 float32 pro Pixel)
 const CACHE_SPHERE_INDEX: u32 = 0u;   // Welche Sphere (0.0=invalid, -1.0=background, -2.0=ground, >0=sphere)
@@ -94,15 +93,16 @@ const CACHE_INVALID: f32 = 0.0;
 const CACHE_BACKGROUND: f32 = -1.0;
 const CACHE_GROUND: f32 = -2.0;
 
-// ===== CACHE-FUNKTIONEN =====
+// ===== OPTIMALER CACHE =====
 
 fn getCacheBaseIndex(coords: vec2<i32>) -> u32 {
     let pixelIndex = u32(coords.y) * renderInfo.width + u32(coords.x);
     let baseIndex = pixelIndex * 6u;
     
+    // Sicherheitsprüfung: Stelle sicher, dass baseIndex + 5 im Buffer liegt
     let totalFloats = renderInfo.width * renderInfo.height * 6u;
     if (baseIndex + 5u >= totalFloats) {
-        return 0u;
+        return 0u; // Fallback auf erstes Pixel
     }
     
     return baseIndex;
@@ -113,7 +113,7 @@ fn isCacheValid(coords: vec2<i32>) -> bool {
     return geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
 }
 
-// Cache-Daten schreiben (für Cache-Miss)
+// Speichere vollständige Geometrie im Cache
 fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>) {
     let baseIndex = getCacheBaseIndex(coords);
     geometryCache[baseIndex + CACHE_SPHERE_INDEX] = sphereIndex;
@@ -124,7 +124,7 @@ fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitP
     geometryCache[baseIndex + CACHE_VALID_FLAG] = 1.0;
 }
 
-// Cache-Daten lesen (für Cache-Hit)
+// Lade vollständige Geometrie aus Cache
 fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
     let baseIndex = getCacheBaseIndex(coords);
     
@@ -139,6 +139,12 @@ fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
     );
     
     return cached;
+}
+
+// Cache-Invalidierung: Setze nur Valid-Flag auf 0
+fn invalidateCache(coords: vec2<i32>) {
+    let baseIndex = getCacheBaseIndex(coords);
+    geometryCache[baseIndex + CACHE_VALID_FLAG] = 0.0;
 }
 
 // ===== ACCUMULATION BUFFER =====
@@ -265,7 +271,7 @@ fn findClosestHit(ray: Ray) -> HitRecord {
         closest.t = tPlane;
         closest.point = ray.origin + ray.direction * tPlane;
         closest.normal = vec3<f32>(0.0, 1.0, 0.0);
-        closest.material = GROUND_MATERIAL_ID;
+        closest.material = GROUND_MATERIAL_ID;  // Korrekte Ground-Material-ID
         closest.color = vec3<f32>(0.6, 0.6, 0.6);
         closest.metallic = 0.0;
     }
@@ -351,16 +357,16 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         
         if (hit.hit) {
             if (hit.material == GROUND_MATERIAL_ID) {
-                // Ground Hit - Cache schreiben
+                // Ground Hit
                 setCachedGeometry(pixelCoords, CACHE_GROUND, hit.t, hit.point);
                 finalColor = calculateLighting(hit.point, hit.normal, hit.color);
             } else {
-                // Sphere Hit - Cache schreiben
+                // Sphere Hit
                 setCachedGeometry(pixelCoords, f32(hit.material), hit.t, hit.point);
                 finalColor = calculateLighting(hit.point, hit.normal, hit.color);
             }
         } else {
-            // Background Hit - Cache schreiben
+            // Background Hit
             setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0));
             finalColor = getBackgroundColor(ray.direction);
         }
