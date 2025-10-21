@@ -1,4 +1,4 @@
-// ===== WGSL COMPUTE SHADER MIT SHADOW-CACHE =====
+// ===== WGSL COMPUTE SHADER MIT SHADOW-CACHE UND SUPERSAMPLING =====
 
 // ===== STRUKTUREN =====
 
@@ -55,7 +55,6 @@ struct Ray {
     direction: vec3<f32>,
 }
 
-// Erweiterte Struktur für gecachte Geometrie + Shadow-Daten
 struct CachedGeometry {
     valid: bool,
     sphereIndex: f32,
@@ -70,7 +69,7 @@ struct CachedGeometry {
 @group(0) @binding(1) var<storage, read> spheres: array<SphereData>; 
 @group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
 @group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>; // 7 float32 Array
+@group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>;
 @group(0) @binding(5) var<storage, read_write> accumulationBuffer: array<f32>;
 @group(0) @binding(6) var<uniform> sceneConfig: SceneConfig;
 
@@ -80,36 +79,31 @@ const MAX_SPHERES: u32 = 1000u;
 const PI: f32 = 3.14159265359;
 const EPSILON: f32 = 0.001;
 
-// Material-IDs
 const GROUND_MATERIAL_ID: u32 = 999u;
 
-// ERWEITETES CACHE-LAYOUT (7 float32 pro Pixel)
-const CACHE_SPHERE_INDEX: u32 = 0u;   // Welche Sphere (0.0=invalid, -1.0=background, -2.0=ground, >0=sphere)
-const CACHE_HIT_DISTANCE: u32 = 1u;   // Entfernung zum Hit-Point
-const CACHE_HIT_POINT_X: u32 = 2u;    // Hit-Point X
-const CACHE_HIT_POINT_Y: u32 = 3u;    // Hit-Point Y  
-const CACHE_HIT_POINT_Z: u32 = 4u;    // Hit-Point Z
-const CACHE_SHADOW_FACTOR: u32 = 5u;  // NEU: Schatten-Faktor (0.0=Schatten, 1.0=Licht)
-const CACHE_VALID_FLAG: u32 = 6u;     // 1.0 = valid, 0.0 = invalid
+// Cache-Layout (7 float32 pro Pixel)
+const CACHE_SPHERE_INDEX: u32 = 0u;
+const CACHE_HIT_DISTANCE: u32 = 1u;
+const CACHE_HIT_POINT_X: u32 = 2u;
+const CACHE_HIT_POINT_Y: u32 = 3u;
+const CACHE_HIT_POINT_Z: u32 = 4u;
+const CACHE_SHADOW_FACTOR: u32 = 5u;
+const CACHE_VALID_FLAG: u32 = 6u;
 
-// Spezielle Werte
 const CACHE_INVALID: f32 = 0.0;
 const CACHE_BACKGROUND: f32 = -1.0;
 const CACHE_GROUND: f32 = -2.0;
-const SHADOW_INVALID: f32 = -1.0;     // Shadow-Factor invalid (neu berechnen)
+const SHADOW_INVALID: f32 = -1.0;
 
-// ===== ERWEITERTE CACHE-FUNKTIONEN =====
+// ===== CACHE-FUNKTIONEN =====
 
 fn getCacheBaseIndex(coords: vec2<i32>) -> u32 {
     let pixelIndex = u32(coords.y) * renderInfo.width + u32(coords.x);
-    let baseIndex = pixelIndex * 7u; // ERWEITERT: 7 float32 pro Pixel
-    
-    // Sicherheitsprüfung: Stelle sicher, dass baseIndex + 6 im Buffer liegt
+    let baseIndex = pixelIndex * 7u;
     let totalFloats = renderInfo.width * renderInfo.height * 7u;
     if (baseIndex + 6u >= totalFloats) {
-        return 0u; // Fallback auf erstes Pixel
+        return 0u;
     }
-    
     return baseIndex;
 }
 
@@ -118,7 +112,6 @@ fn isCacheValid(coords: vec2<i32>) -> bool {
     return geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
 }
 
-// Speichere vollständige Geometrie + Shadow im Cache
 fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>, shadowFactor: f32) {
     let baseIndex = getCacheBaseIndex(coords);
     geometryCache[baseIndex + CACHE_SPHERE_INDEX] = sphereIndex;
@@ -130,10 +123,8 @@ fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitP
     geometryCache[baseIndex + CACHE_VALID_FLAG] = 1.0;
 }
 
-// Lade vollständige Geometrie + Shadow aus Cache
 fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
     let baseIndex = getCacheBaseIndex(coords);
-    
     var cached: CachedGeometry;
     cached.valid = geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
     cached.sphereIndex = geometryCache[baseIndex + CACHE_SPHERE_INDEX];
@@ -144,61 +135,31 @@ fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
         geometryCache[baseIndex + CACHE_HIT_POINT_Z]
     );
     cached.shadowFactor = geometryCache[baseIndex + CACHE_SHADOW_FACTOR];
-    
     return cached;
 }
 
-// Prüfe ob Shadow-Cache gültig ist
 fn isShadowCacheValid(cached: CachedGeometry) -> bool {
     return cached.valid && cached.shadowFactor != SHADOW_INVALID;
 }
 
-// Cache-Invalidierung: Setze nur Valid-Flag auf 0
-fn invalidateCache(coords: vec2<i32>) {
-    let baseIndex = getCacheBaseIndex(coords);
-    geometryCache[baseIndex + CACHE_VALID_FLAG] = 0.0;
+// ===== RANDOM NUMBER GENERATOR =====
+
+fn pcgHash(input: u32) -> u32 {
+    var state = input * 747796405u + 2891336453u;
+    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-// Shadow-only Invalidierung: Setze nur Shadow-Factor auf invalid
-fn invalidateShadowCache(coords: vec2<i32>) {
-    let baseIndex = getCacheBaseIndex(coords);
-    geometryCache[baseIndex + CACHE_SHADOW_FACTOR] = SHADOW_INVALID;
+fn randomFloat(seed: ptr<function, u32>) -> f32 {
+    *seed = pcgHash(*seed);
+    return f32(*seed) / 4294967296.0;
 }
 
-// ===== ACCUMULATION BUFFER (unverändert) =====
-
-fn getAccumulationIndex(coords: vec2<i32>) -> u32 {
-    return (u32(coords.y) * renderInfo.width + u32(coords.x)) * 4u;
+fn randomFloat2(seed: ptr<function, u32>) -> vec2<f32> {
+    return vec2<f32>(randomFloat(seed), randomFloat(seed));
 }
 
-fn accumulateColor(coords: vec2<i32>, newColor: vec3<f32>) {
-    let baseIndex = getAccumulationIndex(coords);
-    let oldR = accumulationBuffer[baseIndex + 0u];
-    let oldG = accumulationBuffer[baseIndex + 1u];
-    let oldB = accumulationBuffer[baseIndex + 2u];
-    let oldCount = accumulationBuffer[baseIndex + 3u];
-    
-    let newCount = oldCount + 1.0;
-    accumulationBuffer[baseIndex + 0u] = oldR + newColor.r;
-    accumulationBuffer[baseIndex + 1u] = oldG + newColor.g;
-    accumulationBuffer[baseIndex + 2u] = oldB + newColor.b;
-    accumulationBuffer[baseIndex + 3u] = newCount;
-}
-
-fn getAverageColor(coords: vec2<i32>) -> vec3<f32> {
-    let baseIndex = getAccumulationIndex(coords);
-    let totalR = accumulationBuffer[baseIndex + 0u];
-    let totalG = accumulationBuffer[baseIndex + 1u];
-    let totalB = accumulationBuffer[baseIndex + 2u];
-    let count = accumulationBuffer[baseIndex + 3u];
-    
-    if (count > 0.0) {
-        return vec3<f32>(totalR / count, totalG / count, totalB / count);
-    }
-    return vec3<f32>(0.0);
-}
-
-// ===== CAMERA RAY (unverändert) =====
+// ===== CAMERA RAY =====
 
 fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     let aspectRatio = f32(renderInfo.width) / f32(renderInfo.height);
@@ -217,7 +178,7 @@ fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     return normalize(forward + x * right + y * up);
 }
 
-// ===== RAY-SPHERE INTERSECTION (unverändert) =====
+// ===== RAY-SPHERE INTERSECTION =====
 
 fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereIndex: u32) -> f32 {
     let sphere = spheres[sphereIndex];
@@ -227,7 +188,6 @@ fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereIndex: u
     let c = dot(oc, oc) - sphere.radius * sphere.radius;
     
     let discriminant = b * b - 4.0 * a * c;
-    
     if (discriminant < 0.0) {
         return -1.0;
     }
@@ -241,27 +201,23 @@ fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereIndex: u
     } else if (t2 > EPSILON) {
         return t2;
     }
-    
     return -1.0;
 }
 
-// ===== RAY-PLANE INTERSECTION (unverändert) =====
+// ===== RAY-PLANE INTERSECTION =====
 
 fn intersectPlane(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, planeY: f32) -> f32 {
     if (abs(rayDirection.y) < 0.0001) {
         return -1.0;
     }
-    
     let t = (planeY - rayOrigin.y) / rayDirection.y;
-    
     if (t > EPSILON) {
         return t;
     }
-    
     return -1.0;
 }
 
-// ===== CLOSEST HIT (unverändert) =====
+// ===== CLOSEST HIT =====
 
 fn findClosestHit(ray: Ray) -> HitRecord {
     var closest: HitRecord;
@@ -297,10 +253,9 @@ fn findClosestHit(ray: Ray) -> HitRecord {
     return closest;
 }
 
-// ===== SHADOW RAY BERECHNUNG =====
+// ===== SHADOW =====
 
 fn calculateShadowFactor(hitPoint: vec3<f32>) -> f32 {
-    // Schatten deaktiviert?
     if (sceneConfig.shadowEnabled < 0.5) {
         return 1.0;
     }
@@ -311,18 +266,16 @@ fn calculateShadowFactor(hitPoint: vec3<f32>) -> f32 {
     
     let actualSphereCount = min(renderInfo.sphereCount, MAX_SPHERES);
     
-    // Test gegen alle Spheres
     for (var i = 0u; i < actualSphereCount; i++) {
         let t = intersectSphere(shadowRayOrigin, lightDir, i);
         if (t > 0.0 && t < lightDist) {
-            return 0.3; // Im Schatten
+            return 0.3;
         }
     }
-    
-    return 1.0; // Kein Schatten
+    return 1.0;
 }
 
-// ===== ERWEITERTE LIGHTING MIT SHADOW-CACHE =====
+// ===== LIGHTING =====
 
 fn calculateLightingWithShadow(hitPoint: vec3<f32>, normal: vec3<f32>, color: vec3<f32>, shadowFactor: f32) -> vec3<f32> {
     let lightDir = normalize(sceneConfig.lightPos - hitPoint);
@@ -333,20 +286,20 @@ fn calculateLightingWithShadow(hitPoint: vec3<f32>, normal: vec3<f32>, color: ve
     return color * lighting;
 }
 
-// ===== HINTERGRUND (unverändert) =====
+// ===== BACKGROUND =====
 
 fn getBackgroundColor(direction: vec3<f32>) -> vec3<f32> {
     let t = 0.5 * (direction.y + 1.0);
     return mix(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.5, 0.7, 1.0), t);
 }
 
-// ===== GAMMA CORRECTION (unverändert) =====
+// ===== GAMMA CORRECTION =====
 
 fn linearToSrgb(linear: vec3<f32>) -> vec3<f32> {
     return pow(linear, vec3<f32>(1.0 / 2.2));
 }
 
-// ===== MAIN COMPUTE SHADER MIT SHADOW-CACHE =====
+// ===== MAIN COMPUTE SHADER =====
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
@@ -356,15 +309,17 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     if (pixelCoords.x >= dimensions.x || pixelCoords.y >= dimensions.y) {
         return;
     }
+
+    // ===== SUPERSAMPLING KONFIGURATION =====
+    const SAMPLES_PER_PIXEL: u32 = 16u;  // ← Hier einstellen: 1, 4, 16, 64
     
     var finalColor: vec3<f32>;
     
     if (isCacheValid(pixelCoords)) {
-        // ===== CACHE-HIT: Geometrie und möglicherweise Shadow gecacht =====
+        // ===== CACHE-HIT: Keine Samples nötig =====
         let cached = getCachedGeometry(pixelCoords);
         
         if (cached.sphereIndex == CACHE_BACKGROUND) {
-            // Background: Keine Geometrie, direkte Farbe
             let uv = vec2<f32>(
                 f32(pixelCoords.x) / f32(dimensions.x),
                 f32(pixelCoords.y) / f32(dimensions.y)
@@ -372,18 +327,14 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
             finalColor = getBackgroundColor(getCameraRay(uv));
             
         } else if (cached.sphereIndex == CACHE_GROUND) {
-            // Ground: Verwende gecachte Hit-Point
             let normal = vec3<f32>(0.0, 1.0, 0.0);
             let groundColor = vec3<f32>(0.6, 0.6, 0.6);
             
             var shadowFactor: f32;
             if (isShadowCacheValid(cached)) {
-                // Shadow gecacht
                 shadowFactor = cached.shadowFactor;
             } else {
-                // Shadow neu berechnen
                 shadowFactor = calculateShadowFactor(cached.hitPoint);
-                // Shadow-Cache updaten (nur Shadow-Factor)
                 let baseIndex = getCacheBaseIndex(pixelCoords);
                 geometryCache[baseIndex + CACHE_SHADOW_FACTOR] = shadowFactor;
             }
@@ -391,19 +342,15 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
             finalColor = calculateLightingWithShadow(cached.hitPoint, normal, groundColor, shadowFactor);
             
         } else {
-            // Sphere: Verwende gecachte Hit-Point, berechne Normal
             let sphereIndex = u32(cached.sphereIndex);
             let sphere = spheres[sphereIndex];
             let normal = normalize(cached.hitPoint - sphere.center);
             
             var shadowFactor: f32;
             if (isShadowCacheValid(cached)) {
-                // Shadow gecacht
                 shadowFactor = cached.shadowFactor;
             } else {
-                // Shadow neu berechnen
                 shadowFactor = calculateShadowFactor(cached.hitPoint);
-                // Shadow-Cache updaten (nur Shadow-Factor)
                 let baseIndex = getCacheBaseIndex(pixelCoords);
                 geometryCache[baseIndex + CACHE_SHADOW_FACTOR] = shadowFactor;
             }
@@ -412,39 +359,69 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         }
         
     } else {
-        // ===== CACHE-MISS: Vollständige Berechnung =====
-        let uv = vec2<f32>(
+        // ===== CACHE-MISS: SUPERSAMPLING =====
+        var accumulatedColor = vec3<f32>(0.0);
+        
+        var seed = u32(pixelCoords.x) + u32(pixelCoords.y) * renderInfo.width;
+        seed += u32(camera.randomSeed1 * 1000000.0);
+        seed = pcgHash(seed);
+        
+        // Mehrere Samples pro Pixel
+        for (var sample = 0u; sample < SAMPLES_PER_PIXEL; sample++) {
+            let baseUV = vec2<f32>(
+                f32(pixelCoords.x) / f32(dimensions.x),
+                f32(pixelCoords.y) / f32(dimensions.y)
+            );
+            
+            let jitter = randomFloat2(&seed);
+            let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
+            let uv = baseUV + (jitter - 0.5) * pixelSize;
+            
+            var ray: Ray;
+            ray.origin = camera.position;
+            ray.direction = getCameraRay(uv);
+            
+            let hit = findClosestHit(ray);
+            
+            var sampleColor: vec3<f32>;
+            
+            if (hit.hit) {
+                let shadowFactor = calculateShadowFactor(hit.point);
+                sampleColor = calculateLightingWithShadow(hit.point, hit.normal, hit.color, shadowFactor);
+            } else {
+                sampleColor = getBackgroundColor(ray.direction);
+            }
+            
+            accumulatedColor += sampleColor;
+        }
+        
+        // Durchschnitt aller Samples
+        finalColor = accumulatedColor / f32(SAMPLES_PER_PIXEL);
+        
+        // Cache für ersten Sample speichern
+        let centerUV = vec2<f32>(
             f32(pixelCoords.x) / f32(dimensions.x),
             f32(pixelCoords.y) / f32(dimensions.y)
         );
         
-        var ray: Ray;
-        ray.origin = camera.position;
-        ray.direction = getCameraRay(uv);
+        var centerRay: Ray;
+        centerRay.origin = camera.position;
+        centerRay.direction = getCameraRay(centerUV);
         
-        let hit = findClosestHit(ray);
+        let centerHit = findClosestHit(centerRay);
         
-        if (hit.hit) {
-            // Shadow für Hit-Point berechnen
-            let shadowFactor = calculateShadowFactor(hit.point);
-            
-            if (hit.material == GROUND_MATERIAL_ID) {
-                // Ground Hit
-                setCachedGeometry(pixelCoords, CACHE_GROUND, hit.t, hit.point, shadowFactor);
-                finalColor = calculateLightingWithShadow(hit.point, hit.normal, hit.color, shadowFactor);
+        if (centerHit.hit) {
+            let shadowFactor = calculateShadowFactor(centerHit.point);
+            if (centerHit.material == GROUND_MATERIAL_ID) {
+                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point, shadowFactor);
             } else {
-                // Sphere Hit
-                setCachedGeometry(pixelCoords, f32(hit.material), hit.t, hit.point, shadowFactor);
-                finalColor = calculateLightingWithShadow(hit.point, hit.normal, hit.color, shadowFactor);
+                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point, shadowFactor);
             }
         } else {
-            // Background Hit (kein Shadow nötig)
             setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0), 1.0);
-            finalColor = getBackgroundColor(ray.direction);
         }
     }
     
-    // Gamma correction und output
     let gammaCorrected = linearToSrgb(finalColor);
     textureStore(outputTexture, pixelCoords, vec4<f32>(gammaCorrected, 1.0));
 }

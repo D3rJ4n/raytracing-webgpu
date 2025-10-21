@@ -106,7 +106,7 @@ export class Scene {
 
         // Beleuchtung hinzufügen
         const pointLight = new THREE.PointLight(0xffffff, 1.0);
-        pointLight.position.set(10, 10, 10);
+        pointLight.position.set(0, 5, 0);
         pointLight.name = 'Main Light';
         this.scene.add(pointLight);
         this.lights.push(pointLight);
