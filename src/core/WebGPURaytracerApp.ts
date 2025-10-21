@@ -19,12 +19,12 @@ export class WebGPURaytracerApp {
 
     private webgpuDevice: WebGPUDevice;
     public scene: Scene;
-    private bufferManager: BufferManager;
+    public bufferManager: BufferManager;
     private textureManager: TextureManager;
     private computePipeline: ComputePipeline;
     private renderPipeline: RenderPipeline;
     private renderer: Renderer;
-    private pixelCache: GeometryPixelCache;
+    public pixelCache: GeometryPixelCache;
     private performanceMonitor: PerformanceMonitor;
 
     private logger: Logger;
@@ -164,6 +164,13 @@ export class WebGPURaytracerApp {
         this.performanceMonitor.recordCacheStats(cacheStats);
     }
 
+    public getBufferManager(): BufferManager {
+        return this.bufferManager;
+    }
+
+    public getPixelCache(): GeometryPixelCache {
+        return this.pixelCache;
+    }
 
     public cleanup(): void {
         this.logger.info('Räume Ressourcen auf...');

@@ -1,6 +1,12 @@
 import { Logger } from "../utils/Logger";
 import { GEOMETRY_CACHE, PERFORMANCE_CONFIG } from "../utils/Constants";
 
+export interface CacheEfficiencyResult {
+    rating: 'Excellent' | 'Good' | 'Fair' | 'Poor';
+    message: string;
+    recommendations: string[];
+}
+
 export class GeometryPixelCache {
     private device: GPUDevice | null = null;
     private cacheBuffer: GPUBuffer | null = null;
@@ -76,9 +82,9 @@ export class GeometryPixelCache {
         let hits = 0;
         let misses = 0;
 
-        // Korrekte Berechnung für 6 float32 pro Pixel
+        // KORREKT: Berechnung für 7 float32 pro Pixel
         for (let i = 0; i < this.stats.totalPixels; i++) {
-            const baseIndex = i * 6; // 6 float32 pro Pixel
+            const baseIndex = i * 7; // GEÄNDERT: 7 statt 6
 
             // WICHTIG: Sicherheitsprüfung für Buffer-Grenzen
             if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
@@ -106,7 +112,7 @@ export class GeometryPixelCache {
             const sampleInfo: string[] = [];
 
             for (let i = 0; i < sampleSize; i++) {
-                const baseIndex = i * 6;
+                const baseIndex = i * 7; // GEÄNDERT: 7 statt 6
 
                 // NEUE Sicherheitsprüfung
                 if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
@@ -175,25 +181,25 @@ export class GeometryPixelCache {
         };
     }
 
-    // REPARIERT: Reset für optimalen Cache (6 float32 pro Pixel)
+    // Reset für optimalen Cache (6 float32 pro Pixel)
     public reset(): void {
         if (!this.device || !this.cacheBuffer) {
             throw new Error('Cache-System nicht initialisiert');
         }
 
-        this.logger.cache('Setze optimalen Geometry-Cache zurück...');
+        this.logger.cache('Setze erweiterten Geometry-Cache zurück...');
 
         const pixelCount = this.canvasWidth * this.canvasHeight;
 
-        // 6 float32 pro Pixel, alle auf 0.0 (invalid) setzen
-        const cacheData = new Float32Array(pixelCount * 6).fill(0.0);
+        // KORRIGIERT: 7 float32 pro Pixel, alle auf 0.0 (invalid) setzen
+        const cacheData = new Float32Array(pixelCount * 7).fill(0.0); // GEÄNDERT: 7 statt 6
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
         // Statistiken zurücksetzen
         this.stats.cacheHits = 0;
         this.stats.cacheMisses = this.stats.totalPixels;
 
-        this.logger.success('Optimaler Geometry-Cache zurückgesetzt (6 float32/pixel)');
+        this.logger.success('Erweiteter Geometry-Cache zurückgesetzt (7 float32/pixel)'); // GEÄNDERT: 7 statt 6
     }
 
     public async performanceTest(renderFunction: () => Promise<void | number>, iterations: number = 3): Promise<{
@@ -236,11 +242,7 @@ export class GeometryPixelCache {
         };
     }
 
-    public evaluateEfficiency(): {
-        rating: 'Excellent' | 'Good' | 'Fair' | 'Poor';
-        message: string;
-        recommendations: string[];
-    } {
+    public evaluateEfficiency(): CacheEfficiencyResult {
         const hitRate = this.getHitRate();
         const recommendations: string[] = [];
 
@@ -295,32 +297,33 @@ export class GeometryPixelCache {
             const arrayBuffer = stagingBuffer.getMappedRange();
             const cacheData = new Float32Array(arrayBuffer);
 
-            // Analyse der Cache-Inhalte (6 float32 Struktur)
+            // KORRIGIERT: Analyse der Cache-Inhalte (7 float32 Struktur)
             const typeCount = new Map<string, number>();
             const actualSampleSize = Math.min(sampleSize, this.stats.totalPixels);
 
-            console.log(`\n=== OPTIMALER CACHE DEBUG (6 float32, erste ${actualSampleSize} Pixel) ===`);
+            console.log(`\n=== ERWEITETER CACHE DEBUG (7 float32, erste ${actualSampleSize} Pixel) ===`);
             console.log(`Buffer Größe: ${this.cacheBuffer.size.toLocaleString()} bytes`);
-            console.log(`Erwartete Größe: ${(this.stats.totalPixels * 6 * 4).toLocaleString()} bytes`);
+            console.log(`Erwartete Größe: ${(this.stats.totalPixels * 7 * 4).toLocaleString()} bytes`); // KORRIGIERT: 7 statt 6
             console.log(`Pixel insgesamt: ${this.stats.totalPixels.toLocaleString()}`);
 
             for (let i = 0; i < actualSampleSize; i++) {
-                const baseIndex = i * 6; // 6 float32 pro Pixel
+                const baseIndex = i * 7; // KORRIGIERT: 7 statt 6
 
-                // Alle 6 Komponenten lesen
-                const sphereIndex = cacheData[baseIndex + GEOMETRY_CACHE.SPHERE_INDEX];
-                const hitDistance = cacheData[baseIndex + GEOMETRY_CACHE.HIT_DISTANCE];
-                const hitPointX = cacheData[baseIndex + GEOMETRY_CACHE.HIT_POINT_X];
-                const hitPointY = cacheData[baseIndex + GEOMETRY_CACHE.HIT_POINT_Y];
-                const hitPointZ = cacheData[baseIndex + GEOMETRY_CACHE.HIT_POINT_Z];
-                const valid = cacheData[baseIndex + GEOMETRY_CACHE.VALID_FLAG];
+                // Alle 7 Komponenten lesen
+                const sphereIndex = cacheData[baseIndex + 0];     // GEOMETRY_CACHE.SPHERE_INDEX
+                const hitDistance = cacheData[baseIndex + 1];     // GEOMETRY_CACHE.HIT_DISTANCE  
+                const hitPointX = cacheData[baseIndex + 2];       // GEOMETRY_CACHE.HIT_POINT_X
+                const hitPointY = cacheData[baseIndex + 3];       // GEOMETRY_CACHE.HIT_POINT_Y
+                const hitPointZ = cacheData[baseIndex + 4];       // GEOMETRY_CACHE.HIT_POINT_Z
+                const shadowFactor = cacheData[baseIndex + 5];    // GEOMETRY_CACHE.SHADOW_FACTOR (NEU)
+                const valid = cacheData[baseIndex + 6];           // GEOMETRY_CACHE.VALID_FLAG
 
                 let type = '';
                 if (valid === 0.0) {
                     type = 'INVALID';
-                } else if (sphereIndex === GEOMETRY_CACHE.BACKGROUND_VALUE) {
+                } else if (sphereIndex === -1.0) {  // GEOMETRY_CACHE.BACKGROUND_VALUE
                     type = 'BACKGROUND';
-                } else if (sphereIndex === GEOMETRY_CACHE.GROUND_VALUE) {
+                } else if (sphereIndex === -2.0) {  // GEOMETRY_CACHE.GROUND_VALUE
                     type = 'GROUND';
                 } else if (sphereIndex >= 0) {
                     type = `SPHERE_${Math.floor(sphereIndex)}`;
@@ -332,7 +335,7 @@ export class GeometryPixelCache {
 
                 // Detaillierte Info für erste paar Pixel
                 if (i < 10) {
-                    console.log(`Pixel ${i}: ${type} | Sphere:${sphereIndex.toFixed(1)} | Dist:${hitDistance.toFixed(3)} | Pos:(${hitPointX.toFixed(2)},${hitPointY.toFixed(2)},${hitPointZ.toFixed(2)}) | Valid:${valid}`);
+                    console.log(`Pixel ${i}: ${type} | Sphere:${sphereIndex.toFixed(1)} | Dist:${hitDistance.toFixed(3)} | Pos:(${hitPointX.toFixed(2)},${hitPointY.toFixed(2)},${hitPointZ.toFixed(2)}) | Shadow:${shadowFactor.toFixed(2)} | Valid:${valid}`);
                 }
             }
 

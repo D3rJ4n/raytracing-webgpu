@@ -178,7 +178,7 @@ export class BufferManager {
 
     // ===== ALLE ANDEREN METHODEN: Komplett unverändert =====
 
-    public getInvalidationStats() {
+    public getInvalidationStats(): any {
         if (this.cacheInvalidationManager) {
             return this.cacheInvalidationManager.getStats();
         } else {
@@ -502,6 +502,13 @@ export class BufferManager {
             this.cacheBuffer !== null &&
             this.accumulationBuffer !== null &&
             this.sceneConfigBuffer !== null;
+    }
+
+    public getDevice(): GPUDevice {
+        if (!this.device) {
+            throw new Error('Device nicht verfügbar');
+        }
+        return this.device;
     }
 
     public cleanup(): void {

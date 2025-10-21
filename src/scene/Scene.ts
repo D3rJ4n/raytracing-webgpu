@@ -151,9 +151,9 @@ export class Scene {
         const sphere1 = this.meshes[index1];
         const sphere2 = this.meshes[index2];
 
-        // Kugeln um +2 Y bewegen
-        sphere1.position.y += 2;
-        sphere2.position.y += 2;
+        // Kugeln um +5 Y bewegen
+        sphere1.position.y += 5;
+        sphere2.position.y += 5;
 
         // Test-Kugeln speichern für Reset
         this.testSpheres = [index1, index2];
