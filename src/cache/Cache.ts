@@ -1,5 +1,5 @@
-import { Logger } from "../../utils/Logger";
-import { GEOMETRY_CACHE, PERFORMANCE_CONFIG } from "../../utils/Constants";
+import { Logger } from "../utils/Logger";
+import { GEOMETRY_CACHE, PERFORMANCE_CONFIG } from "../utils/Constants";
 
 export class GeometryPixelCache {
     private device: GPUDevice | null = null;

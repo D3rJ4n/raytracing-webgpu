@@ -1,4 +1,4 @@
-import { Logger } from '../../utils/Logger';
+import { Logger } from '../utils/Logger';
 
 export interface CameraState {
     position: { x: number; y: number; z: number };

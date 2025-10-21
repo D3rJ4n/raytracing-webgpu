@@ -1,7 +1,7 @@
-import { Logger } from '../../utils/Logger';
-import { GeometryMovementTracker } from './GeometryMovementTracker';
-import { GeometryScreenProjection } from './GeometryScreenProjection';
-import { GeometryInvalidationStats } from './GeometryInvalidationStats';
+import { Logger } from '../utils/Logger';
+import { GeometryMovementTracker } from './MovementTracker';
+import { GeometryScreenProjection } from './ScreenProjection';
+import { GeometryInvalidationStats } from './InvalidationStats';
 
 export interface InvalidationResult {
     pixelsInvalidated: number;

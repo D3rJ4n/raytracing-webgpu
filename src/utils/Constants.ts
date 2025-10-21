@@ -60,9 +60,9 @@ export const BUFFER_CONFIG = {
         LABEL: 'Scene Config Buffer',
     },
     CACHE: {
-        COMPONENTS_PER_PIXEL: 6,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, valid
+        COMPONENTS_PER_PIXEL: 7,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, valid
         BYTES_PER_COMPONENT: 4,      // 4 bytes pro float32
-        BYTES_PER_PIXEL: 24,         // 6 * 4 = 24 bytes pro Pixel
+        BYTES_PER_PIXEL: 28,         // 7 * 4 = 28 bytes pro Pixel
         LABEL: 'Geometry Cache Buffer',
     },
     ACCUMULATION: {
@@ -80,8 +80,8 @@ export const GEOMETRY_CACHE = {
     HIT_POINT_X: 2,     // Index 2: Hit-Point X-Koordinate
     HIT_POINT_Y: 3,     // Index 3: Hit-Point Y-Koordinate  
     HIT_POINT_Z: 4,     // Index 4: Hit-Point Z-Koordinate
-    VALID_FLAG: 5,      // Index 5: 1.0 = valid, 0.0 = invalid
-
+    SHADOW_FACTOR: 5,   // Index 5: Schatten-Faktor (0.0=Schatten, 1.0=Licht)
+    VALID_FLAG: 6,      // Index 6: 1.0 = valid, 0.0 = invalid
     // Spezielle Werte für SPHERE_INDEX
     INVALID_VALUE: 0.0,      // Kein Hit
     BACKGROUND_VALUE: -1.0,  // Background Hit
@@ -186,4 +186,12 @@ export function calculateWorkgroups(width: number, height: number): { x: number;
 export function calculateAccumulationBufferSize(width: number, height: number): number {
     const pixelCount = width * height;
     return pixelCount * BUFFER_CONFIG.ACCUMULATION.BYTES_PER_PIXEL;
+}
+
+export function calculateLightHash(lightPos: { x: number; y: number; z: number }): number {
+    // Einfacher Hash aus Lichtposition
+    const x = Math.floor(lightPos.x * 1000);
+    const y = Math.floor(lightPos.y * 1000);
+    const z = Math.floor(lightPos.z * 1000);
+    return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % 2147483647;
 }
