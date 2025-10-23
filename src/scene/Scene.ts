@@ -15,7 +15,7 @@ export interface RaytracerLight {
 }
 
 /**
- * Scene - Three.js Szenen-Management
+ * Scene - Three.js Szenen-Management mit Animation
  */
 export class Scene {
     private scene!: THREE.Scene;
@@ -26,11 +26,18 @@ export class Scene {
     private lights: THREE.Light[] = [];
     private ambientLightIntensity: number = 0.2;
 
-    private rotationRadius: number = 20;
+    private rotationRadius: number = 25;
     private cameraHeight: number = 10;
 
     // Test-Kugeln für Performance-Tests
     private testSpheres: number[] = [];
+
+    // ===== ANIMATION SYSTEM =====
+    private animationTime: number = 0;
+    private animationSpeed: number = 1.0;
+    private animatedSpheres: Set<number> = new Set();
+    private isAnimationActive: boolean = false;
+    private animationStartTime: number = 0;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -99,6 +106,11 @@ export class Scene {
                 sphere.position.set(position.x, position.y, position.z);
                 sphere.name = `Sphere_${row}_${col}`;
 
+                // Store original position for animation
+                sphere.userData.originalPosition = { ...position };
+                sphere.userData.row = row;
+                sphere.userData.col = col;
+
                 this.scene.add(sphere);
                 this.meshes.push(sphere);
             }
@@ -130,6 +142,123 @@ export class Scene {
         return (r << 16) | (g << 8) | b;
     }
 
+    // ===== ANIMATION METHODS =====
+
+    /**
+     * Starte einfache Animation für Test
+     */
+    public startSimpleAnimation(): void {
+        if (this.isAnimationActive) {
+            this.logger.info('Animation bereits aktiv');
+            return;
+        }
+
+        // Wähle 3 zufällige Kugeln für Animation
+        const animationIndices: number[] = [];
+        for (let i = 0; i < 3; i++) {
+            let index: number;
+            do {
+                index = Math.floor(Math.random() * this.meshes.length);
+            } while (animationIndices.includes(index));
+            animationIndices.push(index);
+        }
+
+        this.animatedSpheres = new Set(animationIndices);
+        this.isAnimationActive = true;
+        this.animationStartTime = performance.now();
+        this.animationTime = 0;
+
+        this.logger.success(`Animation gestartet für ${this.animatedSpheres.size} Kugeln`);
+    }
+
+    /**
+     * Animation stoppen und Positionen zurücksetzen
+     */
+    public stopAnimation(): void {
+        if (!this.isAnimationActive) {
+            this.logger.info('Keine Animation aktiv');
+            return;
+        }
+
+        // Alle animierten Kugeln zurücksetzen
+        this.animatedSpheres.forEach(index => {
+            const sphere = this.meshes[index];
+            const original = sphere.userData.originalPosition;
+            sphere.position.set(original.x, original.y, original.z);
+        });
+
+        this.isAnimationActive = false;
+        this.animatedSpheres.clear();
+        this.animationTime = 0;
+
+        this.logger.success('Animation gestoppt und Positionen zurückgesetzt');
+    }
+
+    /**
+     * Animation um einen Frame vorwärts bewegen
+     */
+    public updateAnimation(deltaTimeMs?: number): boolean {
+        if (!this.isAnimationActive || this.animatedSpheres.size === 0) {
+            return false;
+        }
+
+        // Zeit berechnen
+        const currentTime = performance.now();
+        if (deltaTimeMs === undefined) {
+            deltaTimeMs = currentTime - this.animationStartTime;
+        }
+
+        this.animationTime = (deltaTimeMs * 0.001) * this.animationSpeed; // In Sekunden umwandeln
+
+        let hasMovement = false;
+
+        // Animierte Kugeln bewegen
+        this.animatedSpheres.forEach(index => {
+            const sphere = this.meshes[index];
+            const original = sphere.userData.originalPosition;
+
+            // Einfache Sinus-Animation in Y-Richtung
+            const amplitude = 2.0; // Bewegungsausschlag
+            const frequency = 1.0 + (index * 0.1); // Leicht unterschiedliche Frequenzen
+
+            const oldY = sphere.position.y;
+            const newY = original.y + Math.sin(this.animationTime * frequency) * amplitude;
+
+            sphere.position.y = newY;
+
+            // Prüfe ob sich Position signifikant geändert hat
+            if (Math.abs(newY - oldY) > 0.01) {
+                hasMovement = true;
+            }
+        });
+
+        return hasMovement;
+    }
+
+    /**
+     * Ist Animation aktiv?
+     */
+    public isAnimating(): boolean {
+        return this.isAnimationActive;
+    }
+
+    /**
+     * Animation-Geschwindigkeit setzen
+     */
+    public setAnimationSpeed(speed: number): void {
+        this.animationSpeed = Math.max(0.1, speed);
+        this.logger.info(`Animation-Geschwindigkeit: ${this.animationSpeed}x`);
+    }
+
+    /**
+     * Aktuelle animierte Kugeln-Indizes abrufen
+     */
+    public getAnimatedSphereIndices(): number[] {
+        return Array.from(this.animatedSpheres);
+    }
+
+    // ===== BESTEHENDE METHODS (unverändert) =====
+
     /**
      * Bewege 2 zufällige Kugeln für Performance-Test
      */
@@ -158,7 +287,7 @@ export class Scene {
         // Test-Kugeln speichern für Reset
         this.testSpheres = [index1, index2];
 
-        this.logger.info(`Test-Kugeln verschoben: ${sphere1.name} und ${sphere2.name} um +2 Y`);
+        this.logger.info(`Test-Kugeln verschoben: ${sphere1.name} und ${sphere2.name} um +5 Y`);
     }
 
     /**
@@ -172,7 +301,7 @@ export class Scene {
 
         this.testSpheres.forEach(index => {
             if (index < this.meshes.length) {
-                this.meshes[index].position.y -= 2;
+                this.meshes[index].position.y -= 5;
             }
         });
 
@@ -277,6 +406,8 @@ export class Scene {
         });
         this.meshes = [];
         this.testSpheres = [];
+        this.animatedSpheres.clear();
+        this.isAnimationActive = false;
     }
 
     private logSceneInfo(): void {
@@ -298,6 +429,8 @@ export class Scene {
         this.meshes = [];
         this.lights = [];
         this.testSpheres = [];
+        this.animatedSpheres.clear();
+        this.isAnimationActive = false;
 
         this.logger.init('Szenen-Ressourcen aufgeräumt');
     }

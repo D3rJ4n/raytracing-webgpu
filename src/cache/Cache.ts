@@ -38,8 +38,7 @@ export class GeometryPixelCache {
 
         this.stats.totalPixels = canvasWidth * canvasHeight;
 
-        this.logger.cache('Optimaler Geometry-Cache initialisiert');
-        this.logger.cache(`Canvas: ${canvasWidth}x${canvasHeight} = ${this.stats.totalPixels.toLocaleString()} Pixel`);
+        // Minimal initialization logging
     }
 
     public async readStatistics(): Promise<void> {
@@ -65,7 +64,7 @@ export class GeometryPixelCache {
 
             await stagingBuffer.mapAsync(GPUMapMode.READ);
             const arrayBuffer = stagingBuffer.getMappedRange();
-            const cacheData = new Float32Array(arrayBuffer); // Jetzt Float32Array für optimalen Cache
+            const cacheData = new Float32Array(arrayBuffer);
 
             this.calculateStatistics(cacheData);
 
@@ -82,19 +81,16 @@ export class GeometryPixelCache {
         let hits = 0;
         let misses = 0;
 
-        // KORREKT: Berechnung für 7 float32 pro Pixel
         for (let i = 0; i < this.stats.totalPixels; i++) {
-            const baseIndex = i * 7; // GEÄNDERT: 7 statt 6
+            const baseIndex = i * 7;
 
-            // WICHTIG: Sicherheitsprüfung für Buffer-Grenzen
             if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
-                misses++; // Wenn außerhalb des Buffers, dann Miss
+                misses++;
                 continue;
             }
 
             const validFlag = cacheData[baseIndex + GEOMETRY_CACHE.VALID_FLAG];
 
-            // KORRIGIERT: 1.0 = valid (Hit), 0.0 = invalid (Miss)
             if (validFlag === 1.0) {
                 hits++;
             } else {
@@ -102,51 +98,10 @@ export class GeometryPixelCache {
             }
         }
 
-        // Statistiken setzen
         this.stats.cacheHits = hits;
         this.stats.cacheMisses = misses;
 
-        // Debug-Info mit Sicherheitsprüfungen
-        if (this.stats.totalPixels > 0) {
-            const sampleSize = Math.min(5, this.stats.totalPixels);
-            const sampleInfo: string[] = [];
-
-            for (let i = 0; i < sampleSize; i++) {
-                const baseIndex = i * 7; // GEÄNDERT: 7 statt 6
-
-                // NEUE Sicherheitsprüfung
-                if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
-                    sampleInfo.push('OUT_OF_BOUNDS');
-                    continue;
-                }
-
-                const sphereIndex = cacheData[baseIndex + GEOMETRY_CACHE.SPHERE_INDEX];
-                const valid = cacheData[baseIndex + GEOMETRY_CACHE.VALID_FLAG];
-
-                let type = '';
-                if (valid === 0.0) {
-                    type = 'INVALID';
-                } else if (sphereIndex === GEOMETRY_CACHE.BACKGROUND_VALUE) {
-                    type = 'BACKGROUND';
-                } else if (sphereIndex === GEOMETRY_CACHE.GROUND_VALUE) {
-                    type = 'GROUND';
-                } else if (sphereIndex >= 0) {
-                    type = `SPHERE_${Math.floor(sphereIndex)}`;
-                } else {
-                    type = 'UNKNOWN';
-                }
-
-                sampleInfo.push(`${type}`);
-            }
-
-            this.logger.cache(
-                `Cache-Sample (erste ${sampleSize} Pixel): [${sampleInfo.join(', ')}]`
-            );
-            this.logger.cache(
-                `Hits: ${hits.toLocaleString()}, Misses: ${misses.toLocaleString()}, ` +
-                `Hit-Rate: ${this.getHitRate().toFixed(1)}%`
-            );
-        }
+        // Removed verbose debug output
     }
 
     public logStatistics(frameNumber: number): void {
@@ -181,25 +136,19 @@ export class GeometryPixelCache {
         };
     }
 
-    // Reset für optimalen Cache (6 float32 pro Pixel)
     public reset(): void {
         if (!this.device || !this.cacheBuffer) {
             throw new Error('Cache-System nicht initialisiert');
         }
 
-        this.logger.cache('Setze erweiterten Geometry-Cache zurück...');
-
         const pixelCount = this.canvasWidth * this.canvasHeight;
-
-        // KORRIGIERT: 7 float32 pro Pixel, alle auf 0.0 (invalid) setzen
-        const cacheData = new Float32Array(pixelCount * 7).fill(0.0); // GEÄNDERT: 7 statt 6
+        const cacheData = new Float32Array(pixelCount * 7).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
-        // Statistiken zurücksetzen
         this.stats.cacheHits = 0;
         this.stats.cacheMisses = this.stats.totalPixels;
 
-        this.logger.success('Erweiteter Geometry-Cache zurückgesetzt (7 float32/pixel)'); // GEÄNDERT: 7 statt 6
+        // Removed verbose reset logging
     }
 
     public async performanceTest(renderFunction: () => Promise<void | number>, iterations: number = 3): Promise<{
@@ -207,8 +156,6 @@ export class GeometryPixelCache {
         hitRates: number[];
         totalTime: number;
     }> {
-        this.logger.test(`Starte Performance-Test mit ${iterations} Iterationen...`);
-
         const renderTimes: number[] = [];
         const hitRates: number[] = [];
         const startTime = performance.now();
@@ -222,18 +169,11 @@ export class GeometryPixelCache {
             await this.readStatistics();
             hitRates.push(this.getHitRate());
 
-            this.logger.test(`Iteration ${i + 1}: ${frameTime.toFixed(2)}ms, Hit Rate: ${this.getHitRate().toFixed(1)}%`);
-
             await new Promise(resolve => setTimeout(resolve, PERFORMANCE_CONFIG.FRAME_DELAY_MS));
         }
 
         const totalTime = performance.now() - startTime;
         const averageRenderTime = renderTimes.reduce((a, b) => a + b, 0) / renderTimes.length;
-
-        this.logger.test(`Performance-Test abgeschlossen:`);
-        this.logger.test(`  Durchschnittliche Render-Zeit: ${averageRenderTime.toFixed(2)}ms`);
-        this.logger.test(`  Gesamtzeit: ${totalTime.toFixed(2)}ms`);
-        this.logger.test(`  Finale Hit Rate: ${hitRates[hitRates.length - 1].toFixed(1)}%`);
 
         return {
             averageRenderTime,
@@ -271,90 +211,6 @@ export class GeometryPixelCache {
         return { rating, message, recommendations };
     }
 
-    // Debug-Methode für optimalen Cache
-    public async debugCacheContents(sampleSize: number = 50): Promise<void> {
-        if (!this.device || !this.cacheBuffer) {
-            throw new Error('Cache-System nicht initialisiert');
-        }
-
-        try {
-            const stagingBuffer = this.device.createBuffer({
-                size: this.cacheBuffer.size,
-                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-            });
-
-            const commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(
-                this.cacheBuffer, 0,
-                stagingBuffer, 0,
-                this.cacheBuffer.size
-            );
-            this.device.queue.submit([commandEncoder.finish()]);
-
-            await this.device.queue.onSubmittedWorkDone();
-            await stagingBuffer.mapAsync(GPUMapMode.READ);
-
-            const arrayBuffer = stagingBuffer.getMappedRange();
-            const cacheData = new Float32Array(arrayBuffer);
-
-            // KORRIGIERT: Analyse der Cache-Inhalte (7 float32 Struktur)
-            const typeCount = new Map<string, number>();
-            const actualSampleSize = Math.min(sampleSize, this.stats.totalPixels);
-
-            console.log(`\n=== ERWEITETER CACHE DEBUG (7 float32, erste ${actualSampleSize} Pixel) ===`);
-            console.log(`Buffer Größe: ${this.cacheBuffer.size.toLocaleString()} bytes`);
-            console.log(`Erwartete Größe: ${(this.stats.totalPixels * 7 * 4).toLocaleString()} bytes`); // KORRIGIERT: 7 statt 6
-            console.log(`Pixel insgesamt: ${this.stats.totalPixels.toLocaleString()}`);
-
-            for (let i = 0; i < actualSampleSize; i++) {
-                const baseIndex = i * 7; // KORRIGIERT: 7 statt 6
-
-                // Alle 7 Komponenten lesen
-                const sphereIndex = cacheData[baseIndex + 0];     // GEOMETRY_CACHE.SPHERE_INDEX
-                const hitDistance = cacheData[baseIndex + 1];     // GEOMETRY_CACHE.HIT_DISTANCE  
-                const hitPointX = cacheData[baseIndex + 2];       // GEOMETRY_CACHE.HIT_POINT_X
-                const hitPointY = cacheData[baseIndex + 3];       // GEOMETRY_CACHE.HIT_POINT_Y
-                const hitPointZ = cacheData[baseIndex + 4];       // GEOMETRY_CACHE.HIT_POINT_Z
-                const shadowFactor = cacheData[baseIndex + 5];    // GEOMETRY_CACHE.SHADOW_FACTOR (NEU)
-                const valid = cacheData[baseIndex + 6];           // GEOMETRY_CACHE.VALID_FLAG
-
-                let type = '';
-                if (valid === 0.0) {
-                    type = 'INVALID';
-                } else if (sphereIndex === -1.0) {  // GEOMETRY_CACHE.BACKGROUND_VALUE
-                    type = 'BACKGROUND';
-                } else if (sphereIndex === -2.0) {  // GEOMETRY_CACHE.GROUND_VALUE
-                    type = 'GROUND';
-                } else if (sphereIndex >= 0) {
-                    type = `SPHERE_${Math.floor(sphereIndex)}`;
-                } else {
-                    type = 'UNKNOWN';
-                }
-
-                typeCount.set(type, (typeCount.get(type) || 0) + 1);
-
-                // Detaillierte Info für erste paar Pixel
-                if (i < 10) {
-                    console.log(`Pixel ${i}: ${type} | Sphere:${sphereIndex.toFixed(1)} | Dist:${hitDistance.toFixed(3)} | Pos:(${hitPointX.toFixed(2)},${hitPointY.toFixed(2)},${hitPointZ.toFixed(2)}) | Shadow:${shadowFactor.toFixed(2)} | Valid:${valid}`);
-                }
-            }
-
-            console.log('\n--- CACHE VERTEILUNG ---');
-            typeCount.forEach((count, type) => {
-                const percentage = (count / actualSampleSize * 100).toFixed(1);
-                console.log(`${type}: ${count} Pixel (${percentage}%)`);
-            });
-            console.log('================================\n');
-
-            stagingBuffer.unmap();
-            stagingBuffer.destroy();
-
-        } catch (error) {
-            this.logger.error('Fehler beim Debug der Cache-Inhalte:', error);
-            throw error;
-        }
-    }
-
     public isInitialized(): boolean {
         return this.device !== null && this.cacheBuffer !== null;
     }
@@ -368,7 +224,5 @@ export class GeometryPixelCache {
             cacheHits: 0,
             cacheMisses: 0
         };
-
-        this.logger.cache('Optimaler Cache-System aufgeräumt');
     }
 }

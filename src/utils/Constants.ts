@@ -1,5 +1,3 @@
-// src/utils/Constants.ts - Optimaler Geometry-Cache
-
 export const CANVAS_CONFIG = {
     ID: 'canvas',
     DEFAULT_WIDTH: 800,

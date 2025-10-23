@@ -1,4 +1,4 @@
-// src/core/WebGPURaytracerApp.ts
+// src/core/WebGPURaytracerApp.ts - Clean WebGPU Raytracer
 
 import { WebGPUDevice } from './WebGPUDevice';
 import { Scene } from '../scene/Scene';
@@ -30,9 +30,10 @@ export class WebGPURaytracerApp {
     private logger: Logger;
     private initialized: boolean = false;
 
+    private frameCounter: number = 0;
+
     constructor() {
         this.logger = Logger.getInstance();
-        this.logger.init('Erstelle WebGPU Raytracer App...');
 
         this.canvas = document.getElementById(CANVAS_CONFIG.ID) as HTMLCanvasElement;
         if (!this.canvas) {
@@ -41,8 +42,6 @@ export class WebGPURaytracerApp {
 
         this.statusDisplay = new StatusDisplay(STATUS_CONFIG.ELEMENT_ID);
         this.performanceMonitor = new PerformanceMonitor();
-
-        this.logger.init(`Canvas gefunden: ${this.canvas.width}x${this.canvas.height}`);
 
         this.webgpuDevice = new WebGPUDevice();
         this.scene = new Scene();
@@ -56,21 +55,15 @@ export class WebGPURaytracerApp {
 
     public async initialize(): Promise<void> {
         if (this.initialized) {
-            this.logger.warning('App bereits initialisiert');
             return;
         }
 
         try {
             this.statusDisplay.showInfo('WebGPU Raytracer wird initialisiert...');
 
-            this.logger.init('Initialisiere WebGPU...');
             await this.webgpuDevice.initialize(this.canvas);
-
-            this.logger.init('Erstelle Three.js Szene...');
             this.scene.initialize();
             this.scene.updateCameraAspect(this.canvas.width, this.canvas.height);
-
-            this.logger.init('Erstelle GPU-Ressourcen...');
 
             this.textureManager.initialize(
                 this.webgpuDevice.getDevice(),
@@ -98,8 +91,6 @@ export class WebGPURaytracerApp {
                 this.bufferManager.getCacheBuffer()
             );
 
-            this.logger.init('Erstelle Rendering-Pipelines...');
-
             await this.computePipeline.initialize(
                 this.webgpuDevice.getDevice(),
                 this.bufferManager.getAllBuffers(),
@@ -112,7 +103,6 @@ export class WebGPURaytracerApp {
                 this.textureManager.getSampler()
             );
 
-            this.logger.init('Initialisiere Renderer...');
             this.renderer.initialize(
                 this.webgpuDevice.getDevice(),
                 this.webgpuDevice.getContext(),
@@ -123,13 +113,12 @@ export class WebGPURaytracerApp {
             );
 
             this.performanceMonitor.initialize();
+            this.pixelCache.reset();
 
             this.initialized = true;
-            this.logger.init('Rendere ersten Frame...');
             await this.renderFrame();
 
-            this.statusDisplay.showSuccess('WebGPU Raytracer mit Three.js läuft!');
-            this.logger.success('Initialisierung erfolgreich abgeschlossen');
+            this.statusDisplay.showSuccess('WebGPU Raytracer läuft!');
 
         } catch (error) {
             this.logger.error('Fehler bei Initialisierung:', error);
@@ -143,17 +132,13 @@ export class WebGPURaytracerApp {
             throw new Error('App nicht initialisiert');
         }
 
-        // Use the new intelligent cache invalidation
-        try {
-            await this.bufferManager.invalidateForSceneChanges(this.scene);
-        } catch (error) {
-            this.logger.error('Cache invalidation failed:', error);
-            // Continue with rendering even if invalidation fails
-        }
+        this.frameCounter++;
+
+        // Update spheres buffer with current Three.js positions
+        this.bufferManager.updateSpheresFromScene(this.scene);
 
         const startTime = performance.now();
         await this.renderer.renderFrame(this.canvas);
-
         await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
 
         const frameTime = performance.now() - startTime;
@@ -162,6 +147,13 @@ export class WebGPURaytracerApp {
         await this.pixelCache.readStatistics();
         const cacheStats = this.pixelCache.getStatistics();
         this.performanceMonitor.recordCacheStats(cacheStats);
+
+        // Removed excessive debug logging
+    }
+
+    public resetCache(): void {
+        this.pixelCache.reset();
+        this.frameCounter = 0;
     }
 
     public getBufferManager(): BufferManager {
@@ -173,8 +165,6 @@ export class WebGPURaytracerApp {
     }
 
     public cleanup(): void {
-        this.logger.info('Räume Ressourcen auf...');
-
         if (this.bufferManager) {
             this.bufferManager.cleanup();
         }
@@ -192,6 +182,5 @@ export class WebGPURaytracerApp {
         }
 
         this.initialized = false;
-        this.logger.info('Cleanup abgeschlossen');
     }
 }

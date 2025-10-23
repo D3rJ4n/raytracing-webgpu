@@ -1,8 +1,8 @@
-// src/main.ts - Erweitert um Shadow-Cache Tests
+// src/main.ts - Erweitert um FPS Animation Tests
 
 import { WebGPURaytracerApp } from './core/WebGPURaytracerApp';
+import { sceneTests } from './tests/SceneTest';
 import { Logger } from './utils/Logger';
-import { cacheTest } from './tests/CacheTest';
 
 async function main(): Promise<void> {
     const logger = Logger.getInstance();
@@ -18,18 +18,33 @@ async function main(): Promise<void> {
         // App global verfügbar machen
         (window as any).app = app;
 
-        // NEU: Shadow-Cache Tests initialisieren
-        cacheTest(app);
+        // Alle Tests initialisieren
+        sceneTests(app);
 
         logger.success('✅ Raytracer gestartet!');
         console.log(`📊 Szene: ${app.scene.getSphereCount()} Kugeln automatisch erstellt`);
 
-        // NEU: Zeige verfügbare Test-Kommandos
-        console.log('\n🧪 SHADOW-CACHE TESTS VERFÜGBAR:');
-        console.log('   testShadowCache() - Vollständiger Invalidation-Test');
-        console.log('   analyzeShadowPixels([{x:400,y:300}]) - Analysiere spezifische Pixel');
-        console.log('   runQuickCacheTest() - Schneller Cache-Test');
-        console.log('   app.pixelCache.debugCacheContents(50) - Debug Cache-Inhalte');
+        // Zeige verfügbare Test-Kommandos
+        console.log('\n🧪 VERFÜGBARE TESTS:');
+
+        console.log('\n--- CACHE TESTS ---');
+        console.log('   testCache() - Cache Performance Test');
+
+        console.log('\n--- ANIMATION TESTS ---');
+        console.log('   startAnimation() + animationLoop() - Live Animation');
+        console.log('   testAnimationCache() - Animation + Cache Analyse');
+
+        console.log('\n--- FPS TESTS (EMPFOHLEN!) ---');
+        console.log('   testAnimationFPS() - FPS-Vergleich statisch vs animiert');
+        console.log('   testCacheVsNoCache() - Cache vs No-Cache Performance');
+        console.log('   runAnimationBenchmark() - Umfassendes Benchmark');
+
+        console.log('\n--- DEBUG TESTS ---');
+        console.log('   checkMovementDetection() - Bewegungs-Erkennung analysieren');
+        console.log('   debugCacheInvalidation() - Cache-Invalidierung debuggen');
+
+        console.log('\n🎯 EMPFOHLENER TEST FÜR CACHE-ANIMATION:');
+        console.log('   testCacheVsNoCache() - Zeigt echten Cache-Performance-Unterschied!');
 
     } catch (error) {
         logger.error('Fehler beim Starten:', error);
