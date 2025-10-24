@@ -53,7 +53,7 @@ export class GeometryMovementTracker {
             x: spheresData[offset + 0],
             y: spheresData[offset + 1],
             z: spheresData[offset + 2]
-        };
+        };//optimierung in arbeit erwähnen 
     }
 
     /**

@@ -99,38 +99,18 @@ export const TEXTURE_CONFIG = {
 } as const;
 
 export const SCENE_CONFIG = {
-    CAMERA: {
-        FOV: 60,
-        NEAR: 0.1,
-        FAR: 100,
-        POSITION: { x: 0, y: 0, z: 5 },
-        LOOK_AT: { x: 0, y: 0, z: 0 },
-    },
+
     GROUND: {
         Y_POSITION: -1.0,
         COLOR: { r: 0.8, g: 0.8, b: 0.8 },
         CHECKERBOARD: true,
         CHECKER_SIZE: 1.0,
     },
-    LIGHTING: {
-        POSITION: { x: 5.0, y: 5.0, z: 5.0 },
-        AMBIENT: 0.2,
-        DIFFUSE: 0.8,
-        SHADOW_ENABLED: true,
-        SHADOW_SOFTNESS: 0.0,
-    },
     REFLECTIONS: {
         ENABLED: true,
         MAX_BOUNCES: 3,
         MIN_CONTRIBUTION: 0.01,
     },
-} as const;
-
-export const RAYTRACING_CONFIG = {
-    FOV_RADIANS: 1.0472,
-    NO_HIT_VALUE: -1.0,
-    BACKGROUND_COLOR: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
-    SPHERE_COLOR: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
 } as const;
 
 export const PERFORMANCE_CONFIG = {
