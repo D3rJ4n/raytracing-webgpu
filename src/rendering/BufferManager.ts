@@ -1,7 +1,8 @@
-import { BUFFER_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG } from "../utils/Constants";
+import { BUFFER_CONFIG, BVH_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG } from "../utils/Constants";
 import { Logger } from "../utils/Logger";
 import { Scene } from "../scene/Scene";
 import { GeometryInvalidationManager } from "../cache/InvalidationManager";
+import { BVHBuilder, type BVHBuildResult } from "../acceleration/BVHBuilder";
 
 export class BufferManager {
     private device: GPUDevice | null = null;
@@ -14,8 +15,16 @@ export class BufferManager {
     private accumulationBuffer: GPUBuffer | null = null;
     private sceneConfigBuffer: GPUBuffer | null = null;
 
+    // BVH-BUFFERS 
+    private bvhNodesBuffer: GPUBuffer | null = null;
+    private bvhSphereIndicesBuffer: GPUBuffer | null = null;
+
     private cameraData: Float32Array | null = null;
     private spheresData: Float32Array | null = null;
+
+    private bvhBuilder: BVHBuilder = new BVHBuilder();
+    private lastBVHResult: BVHBuildResult | null = null;
+    private bvhEnabled: boolean = BVH_CONFIG.ENABLED
 
     private canvasWidth: number = 0;
     private canvasHeight: number = 0;
@@ -56,7 +65,71 @@ export class BufferManager {
         this.createAccumulationBuffer(canvasWidth, canvasHeight);
         this.createSceneConfigBuffer(lightPosition, ambientIntensity);
 
+        if (this.bvhEnabled) {
+            this.createBVHBuffers(sphereCount);
+            this.buildBVH(sphereData, sphereCount);
+        }
+
         this.initializeCacheInvalidation();
+
+        this.logger.success(this.bvhEnabled ?
+            'Alle GPU-Buffers erfolgreich erstellt (mit BVH)' :
+            'Alle GPU-Buffers erfolgreich erstellt (ohne BVH)'
+        );
+    }
+
+    /**
+     * BVH-Buffers erstellen 
+     */
+    private createBVHBuffers(sphereCount: number): void {
+        if (!this.device) {
+            throw new Error('Device nicht verfügbar');
+        }
+
+        this.logger.buffer('Erstelle BVH-Buffers...');
+
+        // BVH Nodes Buffer
+        const nodesBufferSize = BUFFER_CONFIG.BVH_NODES.SIZE;
+        this.bvhNodesBuffer = this.device.createBuffer({
+            label: BUFFER_CONFIG.BVH_NODES.LABEL,
+            size: nodesBufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+
+        // BVH Sphere Indices Buffer
+        const indicesBufferSize = BUFFER_CONFIG.BVH_SPHERE_INDICES.SIZE;
+        this.bvhSphereIndicesBuffer = this.device.createBuffer({
+            label: BUFFER_CONFIG.BVH_SPHERE_INDICES.LABEL,
+            size: indicesBufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+
+        this.logger.success(
+            `BVH-Buffers erstellt: ` +
+            `${(nodesBufferSize / 1024).toFixed(1)}KB nodes + ` +
+            `${(indicesBufferSize / 1024).toFixed(1)}KB indices`
+        );
+    }
+
+    /**
+     * BVH bauen und auf GPU laden 
+     */
+    private buildBVH(spheresData: Float32Array, sphereCount: number): void {
+        if (!this.device || !this.bvhNodesBuffer || !this.bvhSphereIndicesBuffer) {
+            this.logger.error('BVH-Buffers nicht verfügbar');
+            return;
+        }
+
+        this.logger.buffer(`Baue BVH für ${sphereCount} Kugeln...`);
+
+        // BVH-Hierarchie erstellen
+        this.lastBVHResult = this.bvhBuilder.buildBVH(spheresData, sphereCount);
+
+        // Daten auf GPU laden (mit expliziter Typ-Konvertierung)
+        this.device.queue.writeBuffer(this.bvhNodesBuffer, 0, new Float32Array(this.lastBVHResult.nodes));
+        this.device.queue.writeBuffer(this.bvhSphereIndicesBuffer, 0, new Uint32Array(this.lastBVHResult.sphereIndices));
+
+        this.logger.success(`BVH erstellt: ${this.lastBVHResult.nodeCount} Nodes, Tiefe ${this.lastBVHResult.maxDepth}`);
     }
 
     private createExtendedCacheBuffer(width: number, height: number): void {
@@ -284,14 +357,90 @@ export class BufferManager {
         this.device.queue.writeBuffer(this.cameraBuffer, 0, extendedData);
     }
 
-    public updateSpheresFromScene(scene: Scene): void {
-        if (!this.device || !this.spheresBuffer) {
-            throw new Error('Buffer Manager nicht initialisiert');
+    private lastSphereHash: string = '';
+
+    public updateSpheresFromScene(scene: Scene, forceRebuild: boolean = false): void {
+        // ===== NULL-CHECKS =====
+        if (!this.device) {
+            throw new Error('BufferManager nicht initialisiert - device ist null');
+        }
+        if (!this.spheresBuffer) {
+            throw new Error('BufferManager nicht initialisiert - spheresBuffer ist null');
         }
 
-        const newSpheresData = scene.getSpheresData();
-        this.spheresData = new Float32Array(newSpheresData.buffer.slice(0));
-        this.device.queue.writeBuffer(this.spheresBuffer, 0, Float32Array.from(this.spheresData));
+        const spheresData = scene.getSpheresData();
+
+        // Prüfe ob sich Spheres tatsächlich geändert haben
+        const currentHash = this.hashSphereData(spheresData);
+        const spheresChanged = currentHash !== this.lastSphereHash || forceRebuild;
+
+        if (spheresChanged) {
+            this.lastSphereHash = currentHash;
+            this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
+            this.logger.buffer(`✅ Spheres aktualisiert (Hash: ${currentHash.slice(0, 8)}...)${forceRebuild ? ' [FORCE]' : ''}`);
+
+            // BVH nur bei echten Änderungen neu bauen
+            if (this.bvhEnabled) {
+                this.buildBVH(spheresData, scene.getSphereCount());
+            }
+        } else {
+            this.logger.buffer('⚡ Spheres unverändert - kein Update/BVH-Rebuild (Cache optimiert!)');
+        }
+    }
+
+    /**
+     * BVH aktivieren/deaktivieren 
+     */
+    public setBVHEnabled(enabled: boolean): void {
+        const wasEnabled = this.bvhEnabled;
+        this.bvhEnabled = enabled;
+
+        if (enabled && !wasEnabled && this.spheresData) {
+            // BVH aktivieren
+            const sphereCount = Math.floor(this.spheresData.length / 8);
+            if (!this.bvhNodesBuffer || !this.bvhSphereIndicesBuffer) {
+                this.createBVHBuffers(sphereCount);
+            }
+            this.buildBVH(this.spheresData, sphereCount);
+            this.logger.buffer('BVH aktiviert');
+        } else if (!enabled && wasEnabled) {
+            // BVH deaktivieren
+            this.logger.buffer('BVH deaktiviert');
+        }
+    }
+
+    /**
+     * BVH-Statistiken abrufen 
+     */
+    public getBVHStats(): {
+        enabled: boolean;
+        nodeCount: number;
+        leafCount: number;
+        maxDepth: number;
+        memoryUsageKB: number;
+        estimatedSpeedup: number;
+    } | null {
+        if (!this.bvhEnabled || !this.lastBVHResult) {
+            return null;
+        }
+
+        const sphereCount = this.spheresData ? Math.floor(this.spheresData.length / 8) : 0;
+        const linearTests = sphereCount;
+        const bvhTests = Math.log2(Math.max(1, sphereCount)) * 1.5;
+        const estimatedSpeedup = linearTests / Math.max(1, bvhTests);
+
+        const nodesBytes = this.lastBVHResult.nodeCount * BVH_CONFIG.BYTES_PER_NODE;
+        const indicesBytes = sphereCount * 4; // uint32
+        const memoryUsageKB = (nodesBytes + indicesBytes) / 1024;
+
+        return {
+            enabled: true,
+            nodeCount: this.lastBVHResult.nodeCount,
+            leafCount: this.lastBVHResult.leafCount,
+            maxDepth: this.lastBVHResult.maxDepth,
+            memoryUsageKB,
+            estimatedSpeedup
+        };
     }
 
     public updateRenderInfo(frameTime: number = 0): void {
@@ -311,19 +460,67 @@ export class BufferManager {
         cache: GPUBuffer;
         accumulation: GPUBuffer;
         sceneConfig: GPUBuffer;
+        bvhNodes?: GPUBuffer;
+        bvhSphereIndices?: GPUBuffer;
     } {
-        if (!this.isInitialized()) {
-            throw new Error('Nicht alle Buffer initialisiert');
+        if (!this.cameraBuffer || !this.spheresBuffer || !this.renderInfoBuffer ||
+            !this.cacheBuffer || !this.accumulationBuffer || !this.sceneConfigBuffer) {
+            throw new Error('Nicht alle Buffers sind initialisiert');
         }
 
-        return {
-            camera: this.cameraBuffer!,
-            spheres: this.spheresBuffer!,
-            renderInfo: this.renderInfoBuffer!,
-            cache: this.cacheBuffer!,
-            accumulation: this.accumulationBuffer!,
-            sceneConfig: this.sceneConfigBuffer!
+        const buffers: any = {
+            camera: this.cameraBuffer,
+            spheres: this.spheresBuffer,
+            renderInfo: this.renderInfoBuffer,
+            cache: this.cacheBuffer,
+            accumulation: this.accumulationBuffer,
+            sceneConfig: this.sceneConfigBuffer,
         };
+
+        // BVH-Buffers hinzufügen falls aktiviert
+        if (this.bvhEnabled && this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
+            buffers.bvhNodes = this.bvhNodesBuffer;
+            buffers.bvhSphereIndices = this.bvhSphereIndicesBuffer;
+        }
+        // 🔧 DEBUG: Buffer-Bindings prüfen  
+        console.log(`🔍 Buffer Bindings Debug:`);
+        console.log(`├─ BVH enabled: ${this.bvhEnabled}`);
+        console.log(`├─ bvhNodesBuffer exists: ${!!this.bvhNodesBuffer}`);
+        console.log(`├─ bvhSphereIndicesBuffer exists: ${!!this.bvhSphereIndicesBuffer}`);
+
+        if (this.bvhEnabled && this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
+            buffers.bvhNodes = this.bvhNodesBuffer;
+            buffers.bvhSphereIndices = this.bvhSphereIndicesBuffer;
+            console.log(`✅ BVH-Buffers zu Bind Group hinzugefügt`);
+        } else {
+            console.log(`❌ BVH-Buffers NICHT hinzugefügt!`);
+        }
+
+        return buffers;
+    }
+
+    private hashSphereData(data: Float32Array): string {
+        // Einfacher Hash für die ersten 100 Bytes (genug für Änderungs-Erkennung)
+        let hash = 0;
+        for (let i = 0; i < Math.min(100, data.length); i++) {
+            hash = ((hash << 5) - hash + data[i]) & 0xffffffff;
+        }
+        return hash.toString();
+    }
+
+    /**
+     * BVH-Buffer-Getter 
+     */
+    public getBVHNodesBuffer(): GPUBuffer | null {
+        return this.bvhNodesBuffer;
+    }
+
+    public getBVHSphereIndicesBuffer(): GPUBuffer | null {
+        return this.bvhSphereIndicesBuffer;
+    }
+
+    public isBVHEnabled(): boolean {
+        return this.bvhEnabled;
     }
 
     public getCacheBuffer(): GPUBuffer {

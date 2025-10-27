@@ -1,222 +1,208 @@
-// src/tests/ConsolidatedTest.ts - Unified Performance Tests
+// src/tests/SceneTest.ts - Clean BVH Tests Only
 
 import type { WebGPURaytracerApp } from '../core/WebGPURaytracerApp';
 
 declare global {
     interface Window {
-        testManualMovement: () => Promise<void>;
-        testAnimatedSpheres: () => Promise<void>;
-        runFullPerformanceTest: () => Promise<void>;
+        testBVH: () => Promise<void>;
+        testBVHvLinear: () => Promise<void>;
+        bvhInfo: () => void;
+        enableBVH: () => void;
+        disableBVH: () => void;
     }
 }
 
 export function sceneTests(app: WebGPURaytracerApp): void {
 
-    // ===== TEST 1: MANUAL MOVEMENT TEST =====
-    window.testManualMovement = async () => {
-        console.log('\n=== MANUAL MOVEMENT TEST ===');
+    // ===== BVH PERFORMANCE TEST =====
+    window.testBVH = async () => {
+        console.clear(); // Clear old console output
+        console.log('\n🧪 === BVH PERFORMANCE TEST ===');
 
-        // Reset cache for clean start
-        app.pixelCache.reset();
-        console.log('Cache reset for clean test');
+        const bufferManager = app.getBufferManager();
 
-        // Capture initial state
-        const initialData = app.scene.getSpheresData();
-        console.log(`Initial scene: ${app.scene.getSphereCount()} spheres loaded`);
-
-        // Measure frame times for static scene (baseline)
-        console.log('\n--- STATIC BASELINE ---');
-        const staticTimes: number[] = [];
-        for (let i = 0; i < 5; i++) {
-            const start = performance.now();
-            await app.renderFrame();
-            const time = performance.now() - start;
-            staticTimes.push(time);
-            console.log(`  Static frame ${i}: ${time.toFixed(1)}ms`);
-            await new Promise(resolve => setTimeout(resolve, 50));
+        if (!bufferManager.isBVHEnabled()) {
+            console.log('❌ BVH ist deaktiviert');
+            console.log('💡 Lösung: enableBVH() eingeben');
+            return;
         }
 
-        const staticAvg = staticTimes.reduce((a, b) => a + b, 0) / staticTimes.length;
-        console.log(`Static average: ${staticAvg.toFixed(1)}ms`);
+        console.log('🌳 BVH ist aktiviert - starte Test...');
 
-        // Move 2 random spheres
-        console.log('\n--- MOVING 2 RANDOM SPHERES ---');
-        app.scene.moveTwoRandomSpheres();
+        // Reset für sauberen Test
+        app.resetCache();
+        await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Measure frame times after movement
-        const movementTimes: number[] = [];
+        const frameTimes: number[] = [];
+
+        console.log('\n📊 Rendering 10 Test-Frames...');
         for (let i = 0; i < 10; i++) {
             const start = performance.now();
             await app.renderFrame();
-            const time = performance.now() - start;
-            movementTimes.push(time);
+            await app.getBufferManager().getDevice().queue.onSubmittedWorkDone();
+            const frameTime = performance.now() - start;
+            frameTimes.push(frameTime);
 
-            // Log cache statistics every few frames
-            if (i % 3 === 0) {
-                await app.pixelCache.readStatistics();
-                const cacheStats = app.pixelCache.getStatistics();
-                console.log(`  Movement frame ${i}: ${time.toFixed(1)}ms, Cache hit rate: ${cacheStats.hitRate.toFixed(1)}%`);
-            } else {
-                console.log(`  Movement frame ${i}: ${time.toFixed(1)}ms`);
-            }
-
+            console.log(`  Frame ${i + 1}: ${frameTime.toFixed(1)}ms`);
             await new Promise(resolve => setTimeout(resolve, 50));
         }
 
-        // Calculate movement performance
-        const movementAvg = movementTimes.reduce((a, b) => a + b, 0) / movementTimes.length;
-        const performanceImpact = ((movementAvg - staticAvg) / staticAvg * 100);
+        const avgTime = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+        const minTime = Math.min(...frameTimes);
+        const maxTime = Math.max(...frameTimes);
+        const fps = 1000 / avgTime;
 
-        console.log('\n--- MANUAL MOVEMENT RESULTS ---');
-        console.log(`Static average: ${staticAvg.toFixed(1)}ms`);
-        console.log(`Movement average: ${movementAvg.toFixed(1)}ms`);
-        console.log(`Performance impact: ${performanceImpact > 0 ? '+' : ''}${performanceImpact.toFixed(1)}%`);
+        console.log('\n🎯 === RESULTS ===');
+        console.log(`Average: ${avgTime.toFixed(1)}ms (${fps.toFixed(1)} FPS)`);
+        console.log(`Best: ${minTime.toFixed(1)}ms (${(1000 / minTime).toFixed(1)} FPS)`);
+        console.log(`Worst: ${maxTime.toFixed(1)}ms (${(1000 / maxTime).toFixed(1)} FPS)`);
 
-        // Reset spheres
-        app.scene.resetTestSpheres();
-        console.log('Test spheres reset to original positions');
+        // BVH Statistiken
+        const bvhStats = bufferManager.getBVHStats();
+        if (bvhStats) {
+            console.log(`\n🌳 BVH Stats:`);
+            console.log(`  Nodes: ${bvhStats.nodeCount} | Depth: ${bvhStats.maxDepth}`);
+            console.log(`  Expected speedup: ${bvhStats.estimatedSpeedup.toFixed(1)}x`);
+        }
 
-        // Final cache statistics
-        await app.pixelCache.readStatistics();
-        const finalStats = app.pixelCache.getStatistics();
-        console.log(`Final cache hit rate: ${finalStats.hitRate.toFixed(1)}%`);
+        // Performance Rating
+        if (fps > 60) {
+            console.log('🚀 EXCELLENT: >60 FPS - BVH funktioniert perfekt!');
+        } else if (fps > 30) {
+            console.log('✅ GOOD: >30 FPS - BVH funktioniert gut');
+        } else if (fps > 15) {
+            console.log('⚠️ OK: >15 FPS - BVH funktioniert');
+        } else {
+            console.log('❌ SLOW: <15 FPS - BVH Problem?');
+        }
     };
 
-    // ===== TEST 2: ANIMATED SPHERES TEST =====
-    window.testAnimatedSpheres = async () => {
-        console.log('\n=== ANIMATED SPHERES TEST ===');
+    // ===== BVH vs LINEAR COMPARISON =====
+    window.testBVHvLinear = async () => {
+        console.clear();
+        console.log('\n🧪 === BVH vs LINEAR COMPARISON ===');
 
-        // Reset cache for clean start
-        app.pixelCache.reset();
-        console.log('Cache reset for clean test');
+        const bufferManager = app.getBufferManager();
 
-        // Baseline measurement
-        console.log('\n--- STATIC BASELINE ---');
-        const baselineTimes: number[] = [];
-        for (let i = 0; i < 3; i++) {
+        // Test 1: Mit BVH
+        console.log('\n🌳 Phase 1: Testing WITH BVH...');
+        bufferManager.setBVHEnabled(true);
+        app.resetCache();
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        const bvhTimes: number[] = [];
+        for (let i = 0; i < 5; i++) {
             const start = performance.now();
             await app.renderFrame();
+            await app.getBufferManager().getDevice().queue.onSubmittedWorkDone();
             const time = performance.now() - start;
-            baselineTimes.push(time);
-            console.log(`  Baseline frame ${i}: ${time.toFixed(1)}ms`);
-            await new Promise(resolve => setTimeout(resolve, 50));
+            bvhTimes.push(time);
+            console.log(`  BVH Frame ${i + 1}: ${time.toFixed(1)}ms`);
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        const baselineAvg = baselineTimes.reduce((a, b) => a + b, 0) / baselineTimes.length;
-        console.log(`Baseline average: ${baselineAvg.toFixed(1)}ms`);
+        // Test 2: Ohne BVH (Linear)
+        console.log('\n📈 Phase 2: Testing WITHOUT BVH (Linear mode)...');
+        bufferManager.setBVHEnabled(false);
+        app.resetCache();
+        await new Promise(resolve => setTimeout(resolve, 200));
 
-        // Start animation with 4 random spheres
-        console.log('\n--- STARTING ANIMATION (4 RANDOM SPHERES) ---');
-
-        // Modify the scene to animate 4 spheres instead of 3
-        // We'll need to manually select 4 random spheres for animation
-        const animationIndices: number[] = [];
-        const totalSpheres = app.scene.getSphereCount();
-
-        for (let i = 0; i < 4; i++) {
-            let index: number;
-            do {
-                index = Math.floor(Math.random() * totalSpheres);
-            } while (animationIndices.includes(index));
-            animationIndices.push(index);
-        }
-
-        console.log(`Selected spheres for animation: [${animationIndices.join(', ')}]`);
-
-        // Start animation (this will use the scene's default 3 spheres, but we'll measure 4)
-        app.scene.startSimpleAnimation();
-
-        // Measure animated frame times
-        const animationTimes: number[] = [];
-        const animationDuration = 20; // Test 20 frames
-
-        console.log('\n--- ANIMATION FRAMES ---');
-        for (let i = 0; i < animationDuration; i++) {
-            // Update animation
-            const hasMovement = app.scene.updateAnimation();
-
-            // Render frame and measure time
+        const linearTimes: number[] = [];
+        for (let i = 0; i < 5; i++) {
             const start = performance.now();
             await app.renderFrame();
+            await app.getBufferManager().getDevice().queue.onSubmittedWorkDone();
             const time = performance.now() - start;
-            animationTimes.push(time);
-
-            // Log every 5th frame with cache stats
-            if (i % 5 === 0) {
-                await app.pixelCache.readStatistics();
-                const cacheStats = app.pixelCache.getStatistics();
-                console.log(`  Animation frame ${i}: ${time.toFixed(1)}ms, Movement: ${hasMovement}, Cache hit rate: ${cacheStats.hitRate.toFixed(1)}%`);
-            } else {
-                console.log(`  Animation frame ${i}: ${time.toFixed(1)}ms, Movement: ${hasMovement}`);
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 50));
+            linearTimes.push(time);
+            console.log(`  Linear Frame ${i + 1}: ${time.toFixed(1)}ms`);
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        // Stop animation
-        app.scene.stopAnimation();
-        console.log('Animation stopped and spheres reset');
+        // BVH wieder aktivieren
+        bufferManager.setBVHEnabled(true);
+        console.log('\n🔄 BVH wieder aktiviert');
 
-        // Calculate animation performance
-        const animationAvg = animationTimes.reduce((a, b) => a + b, 0) / animationTimes.length;
-        const animationImpact = ((animationAvg - baselineAvg) / baselineAvg * 100);
-        const theoreticalFPS = 1000 / animationAvg;
+        // Ergebnisse berechnen
+        const bvhAvg = bvhTimes.reduce((a, b) => a + b, 0) / bvhTimes.length;
+        const linearAvg = linearTimes.reduce((a, b) => a + b, 0) / linearTimes.length;
+        const speedup = linearAvg / bvhAvg;
+        const bvhFPS = 1000 / bvhAvg;
+        const linearFPS = 1000 / linearAvg;
 
-        console.log('\n--- ANIMATION RESULTS ---');
-        console.log(`Baseline average: ${baselineAvg.toFixed(1)}ms`);
-        console.log(`Animation average: ${animationAvg.toFixed(1)}ms`);
-        console.log(`Performance impact: ${animationImpact > 0 ? '+' : ''}${animationImpact.toFixed(1)}%`);
-        console.log(`Theoretical FPS during animation: ${theoreticalFPS.toFixed(1)}`);
+        console.log('\n🏆 === FINAL COMPARISON ===');
+        console.log(`BVH:    ${bvhAvg.toFixed(1)}ms  (${bvhFPS.toFixed(1)} FPS)`);
+        console.log(`Linear: ${linearAvg.toFixed(1)}ms  (${linearFPS.toFixed(1)} FPS)`);
+        console.log(`\n🚀 BVH SPEEDUP: ${speedup.toFixed(1)}x FASTER`);
 
-        // Final cache analysis
-        await app.pixelCache.readStatistics();
-        const finalCacheStats = app.pixelCache.getStatistics();
-        console.log(`Final cache hit rate: ${finalCacheStats.hitRate.toFixed(1)}%`);
+        // Performance Assessment
+        if (speedup > 20) {
+            console.log('🎯 AMAZING: BVH ist >20x schneller! Perfekt!');
+        } else if (speedup > 10) {
+            console.log('🚀 EXCELLENT: BVH ist >10x schneller!');
+        } else if (speedup > 5) {
+            console.log('✅ GOOD: BVH ist >5x schneller');
+        } else if (speedup > 2) {
+            console.log('⚠️ OK: BVH ist >2x schneller');
+        } else {
+            console.log('❌ PROBLEM: BVH Speedup zu gering');
+        }
 
-        // Cache efficiency evaluation
-        const efficiency = app.pixelCache.evaluateEfficiency();
-        console.log(`Cache efficiency: ${efficiency.rating} - ${efficiency.message}`);
+        console.log(`\n📊 Mit ${app.scene.getSphereCount()} Kugeln sollte BVH ~50x schneller sein`);
     };
 
-    // ===== COMBINED FULL TEST =====
-    window.runFullPerformanceTest = async () => {
-        console.log('\n=== FULL PERFORMANCE TEST SUITE ===');
-        console.log('Running both manual movement and animation tests...\n');
+    // ===== BVH INFORMATION =====
+    window.bvhInfo = () => {
+        console.clear();
+        console.log('\n📋 === BVH SYSTEM INFO ===');
 
-        // Run Test 1: Manual Movement
-        await window.testManualMovement();
+        const bufferManager = app.getBufferManager();
+        const sphereCount = app.scene.getSphereCount();
 
-        // Wait between tests
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!bufferManager.isBVHEnabled()) {
+            console.log('❌ BVH Status: DEAKTIVIERT');
+            console.log('💡 Aktivieren mit: enableBVH()');
+            console.log(`📊 Aktuelle Performance: Linear O(${sphereCount}) tests per ray`);
+            return;
+        }
 
-        // Run Test 2: Animated Spheres
-        await window.testAnimatedSpheres();
+        const bvhStats = bufferManager.getBVHStats();
+        if (!bvhStats) {
+            console.log('❌ BVH aktiviert, aber keine Statistiken verfügbar');
+            return;
+        }
 
-        console.log('\n=== FULL TEST COMPLETE ===');
-        console.log('Both tests completed successfully!');
+        console.log('✅ BVH Status: AKTIV');
+        console.log('\n🌳 BVH Struktur:');
+        console.log(`  ├─ Total Nodes: ${bvhStats.nodeCount}`);
+        console.log(`  ├─ Leaf Nodes: ${bvhStats.leafCount}`);
+        console.log(`  ├─ Max Depth: ${bvhStats.maxDepth}`);
+        console.log(`  └─ Memory Usage: ${bvhStats.memoryUsageKB.toFixed(1)} KB`);
+
+        console.log('\n📊 Performance:');
+        console.log(`  ├─ Spheres: ${sphereCount}`);
+        console.log(`  ├─ Linear tests/ray: ${sphereCount}`);
+        console.log(`  ├─ BVH tests/ray: ~${Math.log2(sphereCount).toFixed(1)}`);
+        console.log(`  └─ Expected speedup: ${bvhStats.estimatedSpeedup.toFixed(1)}x`);
+
+        const theoreticalSpeedup = sphereCount / Math.log2(sphereCount);
+        console.log(`\n🎯 Theoretical maximum: ${theoreticalSpeedup.toFixed(1)}x speedup`);
     };
 
     // ===== HELPER FUNCTIONS =====
+    window.enableBVH = () => {
+        app.getBufferManager().setBVHEnabled(true);
+        console.log('🌳 BVH aktiviert - teste mit testBVH()');
+    };
 
-    function logFrameStats(frameTimes: number[], testName: string): void {
-        if (frameTimes.length === 0) return;
+    window.disableBVH = () => {
+        app.getBufferManager().setBVHEnabled(false);
+        console.log('📈 BVH deaktiviert - läuft linear');
+    };
 
-        const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
-        const min = Math.min(...frameTimes);
-        const max = Math.max(...frameTimes);
-        const fps = 1000 / avg;
-
-        console.log(`\n--- ${testName} STATISTICS ---`);
-        console.log(`Average: ${avg.toFixed(1)}ms`);
-        console.log(`Min: ${min.toFixed(1)}ms`);
-        console.log(`Max: ${max.toFixed(1)}ms`);
-        console.log(`Theoretical FPS: ${fps.toFixed(1)}`);
-        console.log('----------------------------');
-    }
-
-    // Log available functions
-    console.log('Consolidated Performance Tests available:');
-    console.log('  testManualMovement() - Test manual sphere movement performance');
-    console.log('  testAnimatedSpheres() - Test 4 animated spheres performance');
-    console.log('  runFullPerformanceTest() - Run both tests sequentially');
+    // Zeige verfügbare Funktionen
+    console.log('\n🧪 BVH TEST FUNCTIONS:');
+    console.log('  testBVH() - BVH Performance Test');
+    console.log('  testBVHvLinear() - BVH vs Linear Vergleich');
+    console.log('  bvhInfo() - BVH System Information');
+    console.log('  enableBVH() / disableBVH() - BVH an/aus');
 }

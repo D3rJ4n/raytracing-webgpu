@@ -72,63 +72,87 @@ export class Scene {
     /**
      * Erstelle 500 Kugeln Grid (25x20)
      */
+    /**
+  * Erstelle massive BVH-Test-Szene (korrigierte Version)
+  */
     private setup500SphereGrid(): void {
         this.clearSpheres();
+        this.logger.init('Erstelle massive BVH-Test-Szene...');
 
-        const cols = 25;
-        const rows = 20;
-        const spacing = 1.0;
-        const baseRadius = 0.25;
+        const SPHERE_COUNT = 200;
+        const WORLD_SIZE = 500;
+        let validSpheres = 0;
+        let invalidSpheres = 0;
 
-        const offsetX = (cols - 1) * spacing / 2;
-        const offsetZ = (rows - 1) * spacing / 2;
+        // Debug: Math.random() testen
+        console.log('Math.random() test:', Math.random(), Math.random(), Math.random());
 
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < cols; col++) {
-                const position = {
-                    x: col * spacing - offsetX,
-                    y: 0.0,
-                    z: row * spacing - offsetZ
-                };
+        for (let i = 0; i < SPHERE_COUNT; i++) {
+            // Schritt-für-Schritt Validierung
+            const randomX = Math.random();
+            const randomY = Math.random();
+            const randomZ = Math.random();
 
-                const color = this.get500GridColor(col, row, cols, rows);
-                const metallic = (col + row) % 4 === 0 ? 0.8 : 0.1;
+            if (!isFinite(randomX) || !isFinite(randomY) || !isFinite(randomZ)) {
+                console.error(`Math.random() defekt bei ${i}: ${randomX}, ${randomY}, ${randomZ}`);
+                invalidSpheres++;
+                continue;
+            }
 
-                const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(baseRadius, 16, 16),
-                    new THREE.MeshStandardMaterial({
-                        color,
-                        metalness: metallic,
-                        roughness: 0.3
-                    })
-                );
+            const x = (randomX - 0.5) * WORLD_SIZE;
+            const y = randomY * 20 + 2; // 2 bis 22
+            const z = (randomZ - 0.5) * WORLD_SIZE;
 
-                sphere.position.set(position.x, position.y, position.z);
-                sphere.name = `Sphere_${row}_${col}`;
+            if (!isFinite(x) || !isFinite(y) || !isFinite(z)) {
+                console.error(`Position-Berechnung defekt bei ${i}: ${x}, ${y}, ${z}`);
+                invalidSpheres++;
+                continue;
+            }
 
-                // Store original position for animation
-                sphere.userData.originalPosition = { ...position };
-                sphere.userData.row = row;
-                sphere.userData.col = col;
+            // Sphere erstellen mit Validierung
+            const radius = 0.3 + Math.random() * 0.4;
+            const hue = i / SPHERE_COUNT;
 
-                this.scene.add(sphere);
-                this.meshes.push(sphere);
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 12, 12),
+                new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(hue, 0.8, 0.6),
+                    metalness: Math.random() > 0.8 ? 0.9 : 0.1,
+                    roughness: 0.3 + Math.random() * 0.4
+                })
+            );
+
+            sphere.position.set(x, y, z);
+            sphere.name = `MassiveSphere_${validSpheres}`;
+            sphere.userData.originalPosition = { x, y, z };
+
+            this.scene.add(sphere);
+            this.meshes.push(sphere);
+            validSpheres++;
+
+            if (i % 200 === 0) {
+                console.log(`${i}/${SPHERE_COUNT} versucht, ${validSpheres} erstellt`);
             }
         }
 
-        // Beleuchtung hinzufügen
-        const pointLight = new THREE.PointLight(0xffffff, 1.0);
-        pointLight.position.set(0, 5, 0);
-        pointLight.name = 'Main Light';
-        this.scene.add(pointLight);
-        this.lights.push(pointLight);
+        // Beleuchtung und Kamera-Setup...
+        const mainLight = new THREE.PointLight(0xffffff, 2.0, WORLD_SIZE * 2);
+        mainLight.position.set(0, WORLD_SIZE * 0.6, 0);
+        this.scene.add(mainLight);
+        this.lights.push(mainLight);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, this.ambientLightIntensity);
-        ambientLight.name = 'Ambient Light';
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
         this.scene.add(ambientLight);
         this.lights.push(ambientLight);
 
-        this.logger.success(`500 Kugeln Grid erstellt: ${this.meshes.length} Kugeln (${cols}x${rows})`);
+        // Kamera für 1000+ Spheres
+        this.camera.position.set(0, 60, 80);
+        this.camera.lookAt(0, 10, 0);
+        this.camera.fov = 75;
+        this.camera.far = 300;
+        this.camera.updateProjectionMatrix();
+
+        this.logger.success(`${this.meshes.length} Spheres über ${WORLD_SIZE}x${WORLD_SIZE} erstellt`);
     }
 
     /**
@@ -185,6 +209,7 @@ export class Scene {
             const sphere = this.meshes[index];
             const original = sphere.userData.originalPosition;
             sphere.position.set(original.x, original.y, original.z);
+
         });
 
         this.isAnimationActive = false;

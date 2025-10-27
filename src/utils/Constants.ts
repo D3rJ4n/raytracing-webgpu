@@ -31,6 +31,27 @@ export const SHADER_CONFIG = {
     },
 } as const;
 
+// BVH-KONFIGURATION
+export const BVH_CONFIG = {
+    MAX_LEAF_SIZE: 6,           // Max Spheres pro Leaf-Node
+    MAX_DEPTH: 20,              // Max BVH-Hierarchie-Tiefe
+    MAX_STACK_SIZE: 32,         // Max Stack-Größe für GPU-Traversierung
+    FLOATS_PER_NODE: 10,         // 10 Bounds + 2 Child-Indizes
+    BYTES_PER_NODE: 40,         // 8 * 4 bytes
+    ENABLED: true,              // BVH aktiviert/deaktiviert
+
+    // Node-Layout (8 floats)
+    NODE_MIN_X: 0,
+    NODE_MIN_Y: 1,
+    NODE_MIN_Z: 2,
+    NODE_MAX_X: 3,
+    NODE_MAX_Y: 4,
+    NODE_MAX_Z: 5,
+    NODE_FIRST_SPHERE: 8,
+    NODE_SPHERE_COUNT: 9,
+} as const;
+
+
 // OPTIMALER GEOMETRY-CACHE: 6 float32 pro Pixel
 export const BUFFER_CONFIG = {
     CAMERA: {
@@ -42,7 +63,7 @@ export const BUFFER_CONFIG = {
         LABEL: 'Sphere Buffer',
     },
     SPHERES: {
-        MAX_COUNT: 1000,
+        MAX_COUNT: 5000,
         BYTES_PER_SPHERE: 48,
         get SIZE() {
             return this.MAX_COUNT * this.BYTES_PER_SPHERE;
@@ -68,6 +89,30 @@ export const BUFFER_CONFIG = {
         BYTES_PER_COMPONENT: 4,
         BYTES_PER_PIXEL: 16,
         LABEL: 'Accumulation Buffer',
+    },
+    // BVH-BUFFERS
+    BVH_NODES: {
+        get BYTES_PER_NODE() {
+            return BVH_CONFIG.BYTES_PER_NODE;
+        },
+        get MAX_NODES() {
+            // Worst-case: vollständiger binärer Baum für 1000 Spheres
+            return Math.max(2000, Math.ceil(BUFFER_CONFIG.SPHERES.MAX_COUNT * 2));
+        },
+        get SIZE() {
+            return this.MAX_NODES * this.BYTES_PER_NODE;
+        },
+        LABEL: 'BVH Nodes Buffer',
+    },
+    BVH_SPHERE_INDICES: {
+        BYTES_PER_INDEX: 4,          // uint32
+        get MAX_INDICES() {
+            return BUFFER_CONFIG.SPHERES.MAX_COUNT;
+        },
+        get SIZE() {
+            return this.MAX_INDICES * this.BYTES_PER_INDEX;
+        },
+        LABEL: 'BVH Sphere Indices Buffer',
     },
 } as const;
 
@@ -134,6 +179,8 @@ export const BINDING_CONFIG = {
         CACHE_BUFFER: 4,
         ACCUMULATION_BUFFER: 5,
         SCENE_CONFIG: 6,
+        BVH_NODES: 7,
+        BVH_SPHERE_INDICES: 8,
     },
     RENDER: {
         INPUT_TEXTURE: 0,
@@ -172,4 +219,32 @@ export function calculateLightHash(lightPos: { x: number; y: number; z: number }
     const y = Math.floor(lightPos.y * 1000);
     const z = Math.floor(lightPos.z * 1000);
     return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % 2147483647;
+}
+
+export function calculateBVHNodesBufferSize(sphereCount: number): number {
+    // Pessimistische Schätzung: 2 * sphereCount Nodes für binären Baum
+    const estimatedNodes = Math.max(100, sphereCount * 2);
+    return estimatedNodes * BVH_CONFIG.BYTES_PER_NODE;
+}
+
+export function calculateBVHIndicesBufferSize(sphereCount: number): number {
+    return sphereCount * BUFFER_CONFIG.BVH_SPHERE_INDICES.BYTES_PER_INDEX;
+}
+
+export function getBVHMemoryUsage(nodeCount: number, sphereCount: number): {
+    nodesBytes: number;
+    indicesBytes: number;
+    totalBytes: number;
+    totalKB: number;
+} {
+    const nodesBytes = nodeCount * BVH_CONFIG.BYTES_PER_NODE;
+    const indicesBytes = sphereCount * BUFFER_CONFIG.BVH_SPHERE_INDICES.BYTES_PER_INDEX;
+    const totalBytes = nodesBytes + indicesBytes;
+
+    return {
+        nodesBytes,
+        indicesBytes,
+        totalBytes,
+        totalKB: totalBytes / 1024
+    };
 }
