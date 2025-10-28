@@ -76,16 +76,15 @@ struct BVHNode {
 // ===== BINDINGS (erweitert um optionale BVH) =====
 
 @group(0) @binding(0) var<uniform> camera: Camera;
-@group(0) @binding(1) var<storage, read> spheres: array<SphereData>; 
+@group(0) @binding(1) var<storage, read> spheres: array<SphereData>;
 @group(0) @binding(2) var<uniform> renderInfo: RenderInfo;
 @group(0) @binding(3) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>;
-@group(0) @binding(5) var<storage, read_write> accumulationBuffer: array<f32>;
-@group(0) @binding(6) var<uniform> sceneConfig: SceneConfig;
+@group(0) @binding(5) var<uniform> sceneConfig: SceneConfig;
 
 // BVH-BINDINGS (NEU - nur wenn BVH aktiv)
-@group(0) @binding(7) var<storage, read> bvhNodes: array<f32>;        // BVH-Nodes (10 floats pro Node)
-@group(0) @binding(8) var<storage, read> bvhSphereIndices: array<u32>; // Sortierte Sphere-Indizes
+@group(0) @binding(6) var<storage, read> bvhNodes: array<f32>;        // BVH-Nodes (10 floats pro Node)
+@group(0) @binding(7) var<storage, read> bvhSphereIndices: array<u32>; // Sortierte Sphere-Indizes
 
 // ===== KONSTANTEN (unverändert aus Ihrem alten Code) =====
 
@@ -317,7 +316,7 @@ fn traverseBVH(ray: Ray) -> HitRecord {
         if (node.leftChild < 0.0) {
             // LEAF NODE - Spheres testen
             let sphereCount = u32(node.sphereCount);
-            let firstSphereIdx = u32(node.firstSphere);  // ✅ KORREKT!
+            let firstSphereIdx = u32(node.firstSphere);  
             
             for (var i = 0u; i < sphereCount; i++) {
                 if (firstSphereIdx + i >= arrayLength(&bvhSphereIndices)) {

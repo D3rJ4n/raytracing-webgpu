@@ -39,7 +39,6 @@ export class ComputePipeline {
             spheres: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
-            accumulation: GPUBuffer;
             sceneConfig: GPUBuffer;
             bvhNodes?: GPUBuffer;
             bvhSphereIndices?: GPUBuffer;
@@ -147,11 +146,6 @@ export class ComputePipeline {
                     buffer: { type: 'storage' as const }
                 },
                 {
-                    binding: BINDING_CONFIG.COMPUTE.ACCUMULATION_BUFFER,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: 'storage' as const }
-                },
-                {
                     binding: BINDING_CONFIG.COMPUTE.SCENE_CONFIG,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: 'uniform' as const }
@@ -174,7 +168,7 @@ export class ComputePipeline {
             ]
         });
 
-        const bindingCount = this.bvhEnabled ? 9 : 7;
+        const bindingCount = this.bvhEnabled ? 8 : 6;
         this.logger.success(`Compute Bind Group Layout erstellt (${bindingCount} Bindings${this.bvhEnabled ? ', inkl. BVH' : ''})`);
     }
 
@@ -211,7 +205,6 @@ export class ComputePipeline {
             spheres: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
-            accumulation: GPUBuffer;
             sceneConfig: GPUBuffer;
             bvhNodes?: GPUBuffer;
             bvhSphereIndices?: GPUBuffer;
@@ -245,10 +238,6 @@ export class ComputePipeline {
             {
                 binding: BINDING_CONFIG.COMPUTE.CACHE_BUFFER,
                 resource: { buffer: buffers.cache }
-            },
-            {
-                binding: BINDING_CONFIG.COMPUTE.ACCUMULATION_BUFFER,
-                resource: { buffer: buffers.accumulation }
             },
             {
                 binding: BINDING_CONFIG.COMPUTE.SCENE_CONFIG,
@@ -288,7 +277,6 @@ export class ComputePipeline {
             spheres: GPUBuffer;
             renderInfo: GPUBuffer;
             cache: GPUBuffer;
-            accumulation: GPUBuffer;
             sceneConfig: GPUBuffer;
             bvhNodes?: GPUBuffer;
             bvhSphereIndices?: GPUBuffer;
@@ -324,7 +312,7 @@ export class ComputePipeline {
         bindingCount: number;
         bvhEnabled: boolean;
     } {
-        const baseBindingCount = 7; // Basis-Bindings
+        const baseBindingCount = 6; // Basis-Bindings
         const bvhBindingCount = this.bvhEnabled ? 2 : 0; // BVH-Bindings
 
         return {

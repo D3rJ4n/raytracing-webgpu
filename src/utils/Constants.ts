@@ -84,12 +84,6 @@ export const BUFFER_CONFIG = {
         BYTES_PER_PIXEL: 28,         // 7 * 4 = 28 bytes pro Pixel
         LABEL: 'Geometry Cache Buffer',
     },
-    ACCUMULATION: {
-        COMPONENTS_PER_PIXEL: 4,
-        BYTES_PER_COMPONENT: 4,
-        BYTES_PER_PIXEL: 16,
-        LABEL: 'Accumulation Buffer',
-    },
     // BVH-BUFFERS
     BVH_NODES: {
         get BYTES_PER_NODE() {
@@ -177,10 +171,9 @@ export const BINDING_CONFIG = {
         RENDER_INFO: 2,
         OUTPUT_TEXTURE: 3,
         CACHE_BUFFER: 4,
-        ACCUMULATION_BUFFER: 5,
-        SCENE_CONFIG: 6,
-        BVH_NODES: 7,
-        BVH_SPHERE_INDICES: 8,
+        SCENE_CONFIG: 5,
+        BVH_NODES: 6,
+        BVH_SPHERE_INDICES: 7,
     },
     RENDER: {
         INPUT_TEXTURE: 0,
@@ -206,11 +199,6 @@ export function calculateWorkgroups(width: number, height: number): { x: number;
         x: Math.ceil(width / SHADER_CONFIG.WORKGROUP_SIZE.X),
         y: Math.ceil(height / SHADER_CONFIG.WORKGROUP_SIZE.Y),
     };
-}
-
-export function calculateAccumulationBufferSize(width: number, height: number): number {
-    const pixelCount = width * height;
-    return pixelCount * BUFFER_CONFIG.ACCUMULATION.BYTES_PER_PIXEL;
 }
 
 export function calculateLightHash(lightPos: { x: number; y: number; z: number }): number {

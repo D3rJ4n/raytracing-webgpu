@@ -54,7 +54,7 @@ export class BVHBuilder {
         // 1. Sphere-Informationen extrahieren
         const spheres = this.extractSpheres(spheresData, sphereCount);
 
-        // 2. Initial sortierte Indizes erstellen
+        // 2. indexieren der Spheres
         const sphereIndices: number[] = Array.from({ length: sphereCount }, (_, i) => i);
 
         // 3. Temporärer Node-Container
@@ -324,11 +324,11 @@ export class BVHBuilder {
             nodeFloats[offset + 4] = node.maxY;
             nodeFloats[offset + 5] = node.maxZ;
 
-            // ===== LEAF-NODE-ERKENNUNG (KRITISCH!) =====
+            // ===== LEAF-NODE-ERKENNUNG =====
             const isLeafNode = (node.leftChild === undefined || node.leftChild === null || node.leftChild < 0);
 
             if (isLeafNode) {
-                // 🍃 LEAF NODE - Enthält Spheres
+                //  LEAF NODE - Enthält Spheres
                 nodeFloats[offset + 6] = -1;  // leftChild = -1 markiert Leaf
                 nodeFloats[offset + 7] = -1;  // rightChild = -1
                 nodeFloats[offset + 8] = node.firstSphere !== undefined ? node.firstSphere : 0;
@@ -337,7 +337,7 @@ export class BVHBuilder {
                 leafNodeCount++;
                 totalSpheres += node.sphereCount || 0;
             } else {
-                // 🌿 INNER NODE - Verweist auf Kinder
+                //  INNER NODE - Verweist auf Kinder
                 nodeFloats[offset + 6] = node.leftChild;
                 nodeFloats[offset + 7] = node.rightChild;
                 nodeFloats[offset + 8] = -1;  // firstSphere = -1 bei Inner-Node

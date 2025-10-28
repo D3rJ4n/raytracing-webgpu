@@ -79,8 +79,8 @@ export class Scene {
         this.clearSpheres();
         this.logger.init('Erstelle massive BVH-Test-Szene...');
 
-        const SPHERE_COUNT = 200;
-        const WORLD_SIZE = 500;
+        const SPHERE_COUNT = 400;
+        const WORLD_SIZE = 400;
         let validSpheres = 0;
         let invalidSpheres = 0;
 

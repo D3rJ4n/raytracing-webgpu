@@ -1,4 +1,4 @@
-import { BUFFER_CONFIG, BVH_CONFIG, calculateAccumulationBufferSize, calculateCacheBufferSize, SCENE_CONFIG } from "../utils/Constants";
+import { BUFFER_CONFIG, BVH_CONFIG, calculateCacheBufferSize } from "../utils/Constants";
 import { Logger } from "../utils/Logger";
 import { Scene } from "../scene/Scene";
 import { GeometryInvalidationManager } from "../cache/InvalidationManager";
@@ -12,7 +12,6 @@ export class BufferManager {
     private spheresBuffer: GPUBuffer | null = null;
     private renderInfoBuffer: GPUBuffer | null = null;
     private cacheBuffer: GPUBuffer | null = null;
-    private accumulationBuffer: GPUBuffer | null = null;
     private sceneConfigBuffer: GPUBuffer | null = null;
 
     // BVH-BUFFERS 
@@ -62,20 +61,11 @@ export class BufferManager {
         this.createSpheresBuffer();
         this.createRenderInfoBuffer(canvasWidth, canvasHeight, sphereCount);
         this.createExtendedCacheBuffer(canvasWidth, canvasHeight);
-        this.createAccumulationBuffer(canvasWidth, canvasHeight);
         this.createSceneConfigBuffer(lightPosition, ambientIntensity);
-
-        if (this.bvhEnabled) {
-            this.createBVHBuffers(sphereCount);
-            this.buildBVH(sphereData, sphereCount);
-        }
+        this.createBVHBuffers(sphereCount);
 
         this.initializeCacheInvalidation();
 
-        this.logger.success(this.bvhEnabled ?
-            'Alle GPU-Buffers erfolgreich erstellt (mit BVH)' :
-            'Alle GPU-Buffers erfolgreich erstellt (ohne BVH)'
-        );
     }
 
     /**
@@ -298,24 +288,6 @@ export class BufferManager {
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
     }
 
-    private createAccumulationBuffer(width: number, height: number): void {
-        if (!this.device) {
-            throw new Error('Device nicht verfügbar');
-        }
-
-        const pixelCount = width * height;
-        const bufferSize = calculateAccumulationBufferSize(width, height);
-
-        this.accumulationBuffer = this.device.createBuffer({
-            label: BUFFER_CONFIG.ACCUMULATION.LABEL,
-            size: bufferSize,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
-        });
-
-        const accumulationData = new Float32Array(pixelCount * 4).fill(0);
-        this.device.queue.writeBuffer(this.accumulationBuffer, 0, accumulationData);
-    }
-
     private createSceneConfigBuffer(lightPosition?: { x: number; y: number; z: number }, ambientIntensity?: number): void {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
@@ -458,13 +430,12 @@ export class BufferManager {
         spheres: GPUBuffer;
         renderInfo: GPUBuffer;
         cache: GPUBuffer;
-        accumulation: GPUBuffer;
         sceneConfig: GPUBuffer;
         bvhNodes?: GPUBuffer;
         bvhSphereIndices?: GPUBuffer;
     } {
         if (!this.cameraBuffer || !this.spheresBuffer || !this.renderInfoBuffer ||
-            !this.cacheBuffer || !this.accumulationBuffer || !this.sceneConfigBuffer) {
+            !this.cacheBuffer || !this.sceneConfigBuffer) {
             throw new Error('Nicht alle Buffers sind initialisiert');
         }
 
@@ -473,7 +444,6 @@ export class BufferManager {
             spheres: this.spheresBuffer,
             renderInfo: this.renderInfoBuffer,
             cache: this.cacheBuffer,
-            accumulation: this.accumulationBuffer,
             sceneConfig: this.sceneConfigBuffer,
         };
 
@@ -550,7 +520,6 @@ export class BufferManager {
             this.spheresBuffer !== null &&
             this.renderInfoBuffer !== null &&
             this.cacheBuffer !== null &&
-            this.accumulationBuffer !== null &&
             this.sceneConfigBuffer !== null;
     }
 
@@ -585,11 +554,6 @@ export class BufferManager {
         if (this.cacheBuffer) {
             this.cacheBuffer.destroy();
             this.cacheBuffer = null;
-        }
-
-        if (this.accumulationBuffer) {
-            this.accumulationBuffer.destroy();
-            this.accumulationBuffer = null;
         }
 
         if (this.sceneConfigBuffer) {
