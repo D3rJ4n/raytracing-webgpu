@@ -1,6 +1,10 @@
-// FIXED InvalidationManager.ts - Einfache aber funktionierende Version
+// InvalidationManager mit selektiver Invalidierung (BVH-kompatibel)
 
 import { Logger } from '../utils/Logger';
+import { GeometryMovementTracker } from './MovementTracker';
+import { GeometryScreenProjection } from './ScreenProjection';
+import { GeometryInvalidationStats } from './InvalidationStats';
+import { BUFFER_CONFIG } from '../utils/Constants';
 
 export interface InvalidationResult {
     pixelsInvalidated: number;
@@ -16,11 +20,11 @@ export class GeometryInvalidationManager {
     private canvasHeight: number;
     private logger: Logger;
 
-    // Einfaches Tracking für Änderungen
-    private lastSphereData: Float32Array | null = null;
-    private lastCameraData: Float32Array | null = null;
+    private movementTracker: GeometryMovementTracker;
+    private screenProjection: GeometryScreenProjection;
+    private stats: GeometryInvalidationStats;
 
-    // DEBUG
+    // DEBUG: Aktiviere detailliertes Logging
     private debugMode: boolean = true;
 
     constructor(
@@ -35,11 +39,15 @@ export class GeometryInvalidationManager {
         this.canvasHeight = canvasHeight;
         this.logger = Logger.getInstance();
 
-        this.logger.cache('FIXED InvalidationManager initialisiert');
+        this.movementTracker = new GeometryMovementTracker();
+        this.screenProjection = new GeometryScreenProjection(canvasWidth, canvasHeight);
+        this.stats = new GeometryInvalidationStats();
+
+        this.logger.cache('InvalidationManager mit selektiver Invalidierung initialisiert');
     }
 
     /**
-     * HAUPTMETHODE: Prüfe auf Änderungen und invalidiere bei Bedarf
+     * HAUPTMETHODE: Prüfe auf Änderungen und invalidiere selektiv
      */
     public async invalidateForFrame(spheresData: Float32Array, cameraData: Float32Array): Promise<InvalidationResult> {
         const startTime = performance.now();
@@ -48,30 +56,12 @@ export class GeometryInvalidationManager {
             this.logger.cache('--- INVALIDATION CHECK START ---');
         }
 
-        // 1. Prüfe ob es das erste Mal ist
-        if (!this.lastSphereData || !this.lastCameraData) {
-            this.logger.cache('Erste Initialisierung - keine Invalidierung nötig');
-            this.lastSphereData = new Float32Array(spheresData);
-            this.lastCameraData = new Float32Array(cameraData);
+        // 1. Bewegungen erkennen
+        const cameraChanged = this.movementTracker.updateCameraData(cameraData);
+        const movedSpheres = this.movementTracker.updateSpheresData(spheresData);
 
-            return {
-                pixelsInvalidated: 0,
-                regionsInvalidated: 0,
-                invalidationTime: performance.now() - startTime,
-                cameraInvalidation: false
-            };
-        }
-
-        // 2. Prüfe Kamera-Änderungen (einfach: alle Werte vergleichen)
-        const cameraChanged = this.hasDataChanged(this.lastCameraData, cameraData, 0.001);
-
-        // 3. Prüfe Sphere-Änderungen (nur Positionen, Radius)
-        const spheresChanged = this.hasSphereDataChanged(this.lastSphereData, spheresData);
-
-        if (this.debugMode) {
-            this.logger.cache(`Kamera geändert: ${cameraChanged ? 'JA' : 'NEIN'}`);
-            this.logger.cache(`Spheres geändert: ${spheresChanged ? 'JA' : 'NEIN'}`);
-        }
+        // 2. Kamera-Parameter für Screen Projection aktualisieren
+        this.updateCameraProjection(cameraData);
 
         let result: InvalidationResult;
 
@@ -79,14 +69,11 @@ export class GeometryInvalidationManager {
             // Kamera bewegt → Komplette Invalidierung
             result = await this.invalidateCompleteCache();
             result.cameraInvalidation = true;
-            this.logger.cache('KAMERA-BEWEGUNG → Komplette Invalidierung');
 
-        } else if (spheresChanged) {
-            // Objekte bewegt → Für jetzt auch komplette Invalidierung
-            // (Das ist der sichere Weg bis die selektive Invalidierung debuggt ist)
-            result = await this.invalidateCompleteCache();
+        } else if (movedSpheres.length > 0) {
+            // Nur Objekte bewegt → Selektive Invalidierung
+            result = await this.handleObjectMovements(movedSpheres, spheresData);
             result.cameraInvalidation = false;
-            this.logger.cache('OBJEKT-BEWEGUNG → Komplette Invalidierung (Safe Mode)');
 
         } else {
             // Keine Änderung → Keine Invalidierung
@@ -96,15 +83,10 @@ export class GeometryInvalidationManager {
                 invalidationTime: performance.now() - startTime,
                 cameraInvalidation: false
             };
-
-            if (this.debugMode) {
-                this.logger.cache('KEINE ÄNDERUNG → Keine Invalidierung');
-            }
         }
 
-        // 4. Aktuelle Daten speichern
-        this.lastSphereData = new Float32Array(spheresData);
-        this.lastCameraData = new Float32Array(cameraData);
+        // Statistiken aktualisieren
+        this.stats.recordInvalidation(result);
 
         result.invalidationTime = performance.now() - startTime;
 
@@ -116,64 +98,148 @@ export class GeometryInvalidationManager {
     }
 
     /**
-     * Prüfe ob Float32Array-Daten sich geändert haben
+     * Kamera-Parameter für Screen Projection setzen
      */
-    private hasDataChanged(oldData: Float32Array, newData: Float32Array, threshold: number = 0.001): boolean {
-        if (oldData.length !== newData.length) {
-            return true;
-        }
+    private updateCameraProjection(cameraData: Float32Array): void {
+        const cameraParams = {
+            position: {
+                x: cameraData[0],
+                y: cameraData[1],
+                z: cameraData[2]
+            },
+            lookAt: {
+                x: cameraData[4],
+                y: cameraData[5],
+                z: cameraData[6]
+            },
+            fov: 1.0472, // 60 Grad in Radiant
+            aspect: this.canvasWidth / this.canvasHeight
+        };
 
-        for (let i = 0; i < oldData.length; i++) {
-            if (Math.abs(oldData[i] - newData[i]) > threshold) {
-                if (this.debugMode) {
-                    this.logger.cache(`Änderung bei Index ${i}: ${oldData[i].toFixed(3)} → ${newData[i].toFixed(3)}`);
-                }
-                return true;
-            }
-        }
+        this.screenProjection.updateCamera(cameraParams);
 
-        return false;
+        if (this.debugMode) {
+            this.logger.cache(`Camera updated: pos(${cameraParams.position.x.toFixed(1)}, ${cameraParams.position.y.toFixed(1)}, ${cameraParams.position.z.toFixed(1)})`);
+        }
     }
 
     /**
-     * Prüfe ob Sphere-Daten sich geändert haben (nur Position + Radius)
+     * Objekt-Bewegungen - Selektive Cache-Invalidierung
      */
-    private hasSphereDataChanged(oldData: Float32Array, newData: Float32Array): boolean {
-        if (oldData.length !== newData.length) {
-            return true;
+    private async handleObjectMovements(
+        movedSpheres: number[],
+        spheresData: Float32Array
+    ): Promise<InvalidationResult> {
+        const startTime = performance.now();
+        let totalPixelsInvalidated = 0;
+        let regionsCount = 0;
+
+        if (this.debugMode) {
+            this.logger.cache(`Verarbeite ${movedSpheres.length} bewegte Spheres...`);
         }
 
-        const sphereCount = Math.floor(newData.length / 8);
+        for (const sphereIndex of movedSpheres) {
+            const sphereData = this.extractSphereData(spheresData, sphereIndex);
+            const oldPosition = this.movementTracker.getLastPosition(sphereIndex);
 
-        for (let i = 0; i < sphereCount; i++) {
-            const offset = i * 8;
+            if (oldPosition && sphereData) {
+                // Screen bounds für alte und neue Position berechnen
+                const oldBounds = this.screenProjection.sphereToScreenBounds(
+                    oldPosition,
+                    sphereData.radius
+                );
+                const newBounds = this.screenProjection.sphereToScreenBounds(
+                    sphereData.position,
+                    sphereData.radius
+                );
 
-            // Prüfe Position (x, y, z) und Radius
-            for (let j = 0; j < 4; j++) { // Nur die ersten 4 Werte: x, y, z, radius
-                const oldValue = oldData[offset + j];
-                const newValue = newData[offset + j];
+                // Vereinigte Bounds + Sicherheitspuffer
+                const combinedBounds = this.combineBounds(oldBounds, newBounds);
+                const expandedBounds = this.expandBounds(combinedBounds, 10);
 
-                if (Math.abs(oldValue - newValue) > 0.001) {
+                // Prüfe ob Bounds gültig sind
+                if (this.screenProjection.isValidBounds(expandedBounds)) {
+                    const pixelsInRegion = await this.invalidateRegion(expandedBounds);
+                    totalPixelsInvalidated += pixelsInRegion;
+                    regionsCount++;
+
                     if (this.debugMode) {
-                        const component = ['x', 'y', 'z', 'radius'][j];
-                        this.logger.cache(`Sphere ${i} ${component}: ${oldValue.toFixed(3)} → ${newValue.toFixed(3)}`);
+                        const area = this.screenProjection.calculateBoundsArea(expandedBounds);
+                        const percentage = (area / (this.canvasWidth * this.canvasHeight)) * 100;
+                        this.logger.cache(`  Sphere ${sphereIndex}: ${pixelsInRegion} pixels (${percentage.toFixed(2)}%)`);
                     }
-                    return true;
                 }
             }
         }
 
-        return false;
+        const invalidationPercentage = (totalPixelsInvalidated / (this.canvasWidth * this.canvasHeight)) * 100;
+
+        this.logger.cache(
+            `SELEKTIVE INVALIDIERUNG: ${movedSpheres.length} Spheres, ` +
+            `${totalPixelsInvalidated.toLocaleString()} pixels (${invalidationPercentage.toFixed(2)}%)`
+        );
+
+        return {
+            pixelsInvalidated: totalPixelsInvalidated,
+            regionsInvalidated: regionsCount,
+            invalidationTime: performance.now() - startTime,
+            cameraInvalidation: false
+        };
     }
 
     /**
-     * Kompletten Cache invalidieren (sicher aber nicht optimal)
+     * Region invalidieren (sichere Version für BVH-kompatiblen Cache mit 7 floats)
+     */
+    private async invalidateRegion(bounds: {
+        minX: number; minY: number; maxX: number; maxY: number;
+    }): Promise<number> {
+        // Bounds validieren und klampen
+        const safeBounds = {
+            minX: Math.max(0, Math.min(this.canvasWidth - 1, Math.floor(bounds.minX))),
+            minY: Math.max(0, Math.min(this.canvasHeight - 1, Math.floor(bounds.minY))),
+            maxX: Math.max(0, Math.min(this.canvasWidth - 1, Math.ceil(bounds.maxX))),
+            maxY: Math.max(0, Math.min(this.canvasHeight - 1, Math.ceil(bounds.maxY)))
+        };
+
+        // Doppelcheck: Bounds sind gültig
+        if (safeBounds.minX > safeBounds.maxX || safeBounds.minY > safeBounds.maxY) {
+            return 0;
+        }
+
+        let pixelsInvalidated = 0;
+        const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL; // 7
+        const bytesPerComponent = BUFFER_CONFIG.CACHE.BYTES_PER_COMPONENT; // 4
+        const validFlagOffset = 6; // CACHE_VALID_FLAG ist der 7. Wert (Index 6)
+
+        // Pixel-für-Pixel invalidieren
+        for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
+            for (let x = safeBounds.minX; x <= safeBounds.maxX; x++) {
+                const pixelIndex = y * this.canvasWidth + x;
+                const validFlagByteOffset = pixelIndex * componentsPerPixel * bytesPerComponent + validFlagOffset * bytesPerComponent;
+
+                // Setze CACHE_VALID_FLAG auf 0.0
+                this.device.queue.writeBuffer(
+                    this.cacheBuffer,
+                    validFlagByteOffset,
+                    new Float32Array([0.0])
+                );
+
+                pixelsInvalidated++;
+            }
+        }
+
+        return pixelsInvalidated;
+    }
+
+    /**
+     * Kompletten Cache invalidieren
      */
     private async invalidateCompleteCache(): Promise<InvalidationResult> {
         const totalPixels = this.canvasWidth * this.canvasHeight;
+        const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL; // 7
 
-        // METHODE 1: Kompletter Cache-Reset
-        const cacheData = new Float32Array(totalPixels * 7).fill(0.0);
+        // Kompletter Cache-Reset
+        const cacheData = new Float32Array(totalPixels * componentsPerPixel).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
         this.logger.cache(`Kompletter Cache invalidiert: ${totalPixels.toLocaleString()} Pixel`);
@@ -187,33 +253,85 @@ export class GeometryInvalidationManager {
     }
 
     /**
+     * Sphere-Daten aus Float32Array extrahieren
+     */
+    private extractSphereData(spheresData: Float32Array, sphereIndex: number): {
+        position: { x: number; y: number; z: number };
+        radius: number;
+    } | null {
+        const offset = sphereIndex * 8;
+        if (offset + 3 >= spheresData.length) return null;
+
+        return {
+            position: {
+                x: spheresData[offset + 0],
+                y: spheresData[offset + 1],
+                z: spheresData[offset + 2]
+            },
+            radius: spheresData[offset + 3]
+        };
+    }
+
+    /**
+     * Bounds kombinieren
+     */
+    private combineBounds(
+        bounds1: { minX: number; minY: number; maxX: number; maxY: number },
+        bounds2: { minX: number; minY: number; maxX: number; maxY: number }
+    ) {
+        return {
+            minX: Math.min(bounds1.minX, bounds2.minX),
+            minY: Math.min(bounds1.minY, bounds2.minY),
+            maxX: Math.max(bounds1.maxX, bounds2.maxX),
+            maxY: Math.max(bounds1.maxY, bounds2.maxY)
+        };
+    }
+
+    /**
+     * Bounds erweitern (Sicherheitspuffer)
+     */
+    private expandBounds(
+        bounds: { minX: number; minY: number; maxX: number; maxY: number },
+        padding: number
+    ) {
+        return {
+            minX: Math.max(0, bounds.minX - padding),
+            minY: Math.max(0, bounds.minY - padding),
+            maxX: Math.min(this.canvasWidth - 1, bounds.maxX + padding),
+            maxY: Math.min(this.canvasHeight - 1, bounds.maxY + padding)
+        };
+    }
+
+    /**
      * Debug-Modus umschalten
      */
     public setDebugMode(enabled: boolean): void {
         this.debugMode = enabled;
-        this.logger.cache(`FIXED InvalidationManager Debug: ${enabled ? 'ON' : 'OFF'}`);
+        this.logger.cache(`InvalidationManager Debug: ${enabled ? 'ON' : 'OFF'}`);
     }
 
     /**
-     * Statistiken (Dummy für Kompatibilität)
+     * Statistiken abrufen
      */
     public getStats() {
-        return {
-            totalInvalidations: 0,
-            pixelsInvalidated: 0,
-            lastInvalidationTime: 0
-        };
+        return this.stats.getStats();
     }
 
+    /**
+     * Statistiken zurücksetzen
+     */
     public resetStats(): void {
-        this.lastSphereData = null;
-        this.lastCameraData = null;
-        this.logger.cache('FIXED InvalidationManager Stats zurückgesetzt');
+        this.stats.reset();
+        this.movementTracker.reset();
     }
 
+    /**
+     * Cleanup
+     */
     public cleanup(): void {
-        this.lastSphereData = null;
-        this.lastCameraData = null;
-        this.logger.cache('FIXED InvalidationManager aufgeräumt');
+        this.movementTracker.cleanup();
+        this.screenProjection.cleanup();
+        this.stats.cleanup();
+        this.logger.cache('InvalidationManager aufgeräumt');
     }
 }

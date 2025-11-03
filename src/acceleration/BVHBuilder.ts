@@ -66,36 +66,10 @@ export class BVHBuilder {
         // 5. Flache Arrays für GPU erstellen
         const result = this.createGPUArrays(tempNodes, sphereIndices);
 
-        // 🔧 DEBUG: BVH-Daten prüfen (KRITISCH FÜR DIAGNOSE!)
-        console.log(`🔍 BVH Debug:`);
-        console.log(`├─ Temp nodes count: ${tempNodes.length}`);
-        console.log(`├─ Result nodes array length: ${result.nodes.length}`);
-        console.log(`├─ Result nodeCount: ${result.nodeCount}`);
-        console.log(`├─ Expected floats: ${result.nodeCount * 10}`);
-        console.log(`├─ Actual floats: ${result.nodes.length}`);
-        console.log(`└─ Floats per node: ${result.nodes.length / result.nodeCount}`);
-
-        // Debug erste Node
-        if (result.nodes.length >= 10) {
-            console.log(`🌳 First BVH Node (should be 10 floats):`);
-            console.log(`├─ minBounds: ${result.nodes[0].toFixed(2)}, ${result.nodes[1].toFixed(2)}, ${result.nodes[2].toFixed(2)}`);
-            console.log(`├─ maxBounds: ${result.nodes[3].toFixed(2)}, ${result.nodes[4].toFixed(2)}, ${result.nodes[5].toFixed(2)}`);
-            console.log(`├─ leftChild: ${result.nodes[6]}`);
-            console.log(`├─ rightChild: ${result.nodes[7]}`);
-
-            if (result.nodes.length >= 10) {
-                console.log(`├─ firstSphere: ${result.nodes[8]}`);
-                console.log(`└─ sphereCount: ${result.nodes[9]}`);
-            } else {
-                console.log(`❌ FEHLER: firstSphere und sphereCount fehlen!`);
-            }
-        }
-
-        // Debug Sphere-Indizes
-        console.log(`📊 Sphere Indices Debug:`);
-        console.log(`├─ sphereIndices length: ${result.sphereIndices.length}`);
-        console.log(`├─ Expected: ${sphereCount}`);
-        console.log(`└─ First 10: [${result.sphereIndices.slice(0, 10).join(', ')}]`);
+        // DEBUG deaktiviert für Performance-Tests
+        // console.log(`🔍 BVH Debug:`);
+        // console.log(`├─ Temp nodes count: ${tempNodes.length}`);
+        // ...
 
         // 6. Statistiken loggen
         this.buildStats.buildTime = performance.now() - startTime;
@@ -348,16 +322,8 @@ export class BVHBuilder {
         // Sphere Indices Array
         const sphereIndicesArray = new Uint32Array(sphereIndices);
 
-        // ===== KOMPAKTER DEBUG =====
-        console.log(`📊 BVH: ${nodes.length} nodes (${leafNodeCount} leaves, ${totalSpheres} spheres)`);
-
-        if (leafNodeCount === 0) {
-            console.log(`❌ FEHLER: Keine Leaf-Nodes!`);
-        } else if (totalSpheres !== sphereIndices.length) {
-            console.log(`⚠️ Sphere-Count: ${totalSpheres}/${sphereIndices.length}`);
-        } else {
-            console.log(`✅ BVH-Struktur korrekt!`);
-        }
+        // DEBUG deaktiviert für Performance-Tests
+        // console.log(`📊 BVH: ${nodes.length} nodes`);
 
         return {
             nodes: nodeFloats,

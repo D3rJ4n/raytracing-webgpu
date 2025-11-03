@@ -47,7 +47,8 @@ export class BufferManager {
         cameraData: Float32Array,
         sphereData: Float32Array,
         lightPosition?: { x: number; y: number; z: number },
-        ambientIntensity?: number
+        ambientIntensity?: number,
+        groundY?: number
     ): void {
         this.device = device;
         this.cameraData = cameraData;
@@ -61,7 +62,7 @@ export class BufferManager {
         this.createSpheresBuffer();
         this.createRenderInfoBuffer(canvasWidth, canvasHeight, sphereCount);
         this.createExtendedCacheBuffer(canvasWidth, canvasHeight);
-        this.createSceneConfigBuffer(lightPosition, ambientIntensity);
+        this.createSceneConfigBuffer(lightPosition, ambientIntensity, groundY);
         this.createBVHBuffers(sphereCount);
 
         this.initializeCacheInvalidation();
@@ -119,7 +120,7 @@ export class BufferManager {
         this.device.queue.writeBuffer(this.bvhNodesBuffer, 0, new Float32Array(this.lastBVHResult.nodes));
         this.device.queue.writeBuffer(this.bvhSphereIndicesBuffer, 0, new Uint32Array(this.lastBVHResult.sphereIndices));
 
-        this.logger.success(`BVH erstellt: ${this.lastBVHResult.nodeCount} Nodes, Tiefe ${this.lastBVHResult.maxDepth}`);
+        // this.logger.success(`BVH erstellt: ${this.lastBVHResult.nodeCount} Nodes, Tiefe ${this.lastBVHResult.maxDepth}`);
     }
 
     private createExtendedCacheBuffer(width: number, height: number): void {
@@ -288,7 +289,7 @@ export class BufferManager {
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
     }
 
-    private createSceneConfigBuffer(lightPosition?: { x: number; y: number; z: number }, ambientIntensity?: number): void {
+    private createSceneConfigBuffer(lightPosition?: { x: number; y: number; z: number }, ambientIntensity?: number, groundY?: number): void {
         if (!this.device) {
             throw new Error('Device nicht verfügbar');
         }
@@ -301,10 +302,11 @@ export class BufferManager {
 
         const light = lightPosition || { x: 0, y: 10, z: 0 };
         const ambient = ambientIntensity !== undefined ? ambientIntensity : 0.2;
+        const ground = groundY !== undefined ? groundY : -1.0;
 
         // Match the original structure exactly
         const sceneConfigData = new Float32Array([
-            -2.0, 0, 0, 0,           // Ground Y position, padding
+            ground, 0, 0, 0,           // Ground Y position (from Three.js), padding
             light.x, light.y, light.z, 1.0,  // Light position, shadow enabled
             1.0, 8, 0.01, ambient     // Reflections enabled, max bounces, min contribution, ambient
         ]);
@@ -349,14 +351,15 @@ export class BufferManager {
         if (spheresChanged) {
             this.lastSphereHash = currentHash;
             this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
-            this.logger.buffer(`✅ Spheres aktualisiert (Hash: ${currentHash.slice(0, 8)}...)${forceRebuild ? ' [FORCE]' : ''}`);
+            // this.logger.buffer(`✅ Spheres aktualisiert (Hash: ${currentHash.slice(0, 8)}...)${forceRebuild ? ' [FORCE]' : ''}`);
 
             // BVH nur bei echten Änderungen neu bauen
             if (this.bvhEnabled) {
+                console.log(`🔧 BVH Rebuild: Hash changed from ${this.lastSphereHash} to ${currentHash}`);
                 this.buildBVH(spheresData, scene.getSphereCount());
             }
         } else {
-            this.logger.buffer('⚡ Spheres unverändert - kein Update/BVH-Rebuild (Cache optimiert!)');
+            // this.logger.buffer('⚡ Spheres unverändert - kein Update/BVH-Rebuild (Cache optimiert!)');
         }
     }
 

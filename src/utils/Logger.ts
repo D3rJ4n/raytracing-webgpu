@@ -147,28 +147,4 @@ export class Logger {
         this.log(LogLevel.ERROR, '⚠️', 'WEBGPU', message, ...args);
     }
 
-    // ===== SPEZIELLE FORMATIERUNGEN =====
-
-    public logCacheStatistics(frameNum: number, stats: {
-        totalPixels: number;
-        cacheHits: number;
-        cacheMisses: number;
-    }): void {
-        // Cache-Statistiken werden nicht automatisch ausgegeben
-        // Nur bei explizitem Aufruf
-    }
-
-    public logPixelSample(step: number, pixels: Array<{
-        index: number;
-        r: number;
-        g: number;
-        b: number;
-        valid: number;
-    }>): void {
-        // Pixel-Samples nicht ausgeben
-    }
-
-    public logOverallStatistics(step: number, totalPixels: number, validPixels: number, invalidPixels: number): void {
-        // Overall-Statistiken nicht ausgeben
-    }
 }

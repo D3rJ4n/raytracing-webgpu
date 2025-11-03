@@ -24,6 +24,7 @@ export class Scene {
 
     private meshes: THREE.Mesh[] = [];
     private lights: THREE.Light[] = [];
+    private groundMesh!: THREE.Mesh;
     private ambientLightIntensity: number = 0.2;
 
     private rotationRadius: number = 25;
@@ -48,6 +49,7 @@ export class Scene {
 
         this.createScene();
         this.createCamera();
+        this.createGround();
 
         // 500 Kugeln Grid erstellen
         this.setup500SphereGrid();
@@ -67,6 +69,26 @@ export class Scene {
         this.camera.position.set(0, this.cameraHeight, this.rotationRadius);
         this.camera.lookAt(0, 0, 0);
         this.logger.init(`Kamera erstellt: FOV=60°, Position=(0, ${this.cameraHeight}, ${this.rotationRadius})`);
+    }
+
+    /**
+     * Erstelle Ground-Plane mit Three.js
+     */
+    private createGround(): void {
+        const groundSize = 500;
+        this.groundMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(groundSize, groundSize),
+            new THREE.MeshStandardMaterial({
+                color: 0xcccccc,
+                roughness: 0.8,
+                metalness: 0.1
+            })
+        );
+        this.groundMesh.rotation.x = -Math.PI / 2; // Horizontal
+        this.groundMesh.position.y = -1.0;
+        this.groundMesh.name = 'Ground';
+        this.scene.add(this.groundMesh);
+        this.logger.init(`Ground-Plane erstellt: Y=${this.groundMesh.position.y}, Größe=${groundSize}x${groundSize}`);
     }
 
     /**
@@ -155,69 +177,7 @@ export class Scene {
         this.logger.success(`${this.meshes.length} Spheres über ${WORLD_SIZE}x${WORLD_SIZE} erstellt`);
     }
 
-    /**
-     * Farbe für 500er Grid
-     */
-    private get500GridColor(col: number, row: number, totalCols: number, totalRows: number): number {
-        const t = (col / totalCols + row / totalRows) / 2;
-        const r = Math.floor(Math.sin(t * Math.PI * 2) * 127 + 128);
-        const g = Math.floor(Math.sin(t * Math.PI * 2 + 2) * 127 + 128);
-        const b = Math.floor(Math.sin(t * Math.PI * 2 + 4) * 127 + 128);
-        return (r << 16) | (g << 8) | b;
-    }
-
     // ===== ANIMATION METHODS =====
-
-    /**
-     * Starte einfache Animation für Test
-     */
-    public startSimpleAnimation(): void {
-        if (this.isAnimationActive) {
-            this.logger.info('Animation bereits aktiv');
-            return;
-        }
-
-        // Wähle 3 zufällige Kugeln für Animation
-        const animationIndices: number[] = [];
-        for (let i = 0; i < 3; i++) {
-            let index: number;
-            do {
-                index = Math.floor(Math.random() * this.meshes.length);
-            } while (animationIndices.includes(index));
-            animationIndices.push(index);
-        }
-
-        this.animatedSpheres = new Set(animationIndices);
-        this.isAnimationActive = true;
-        this.animationStartTime = performance.now();
-        this.animationTime = 0;
-
-        this.logger.success(`Animation gestartet für ${this.animatedSpheres.size} Kugeln`);
-    }
-
-    /**
-     * Animation stoppen und Positionen zurücksetzen
-     */
-    public stopAnimation(): void {
-        if (!this.isAnimationActive) {
-            this.logger.info('Keine Animation aktiv');
-            return;
-        }
-
-        // Alle animierten Kugeln zurücksetzen
-        this.animatedSpheres.forEach(index => {
-            const sphere = this.meshes[index];
-            const original = sphere.userData.originalPosition;
-            sphere.position.set(original.x, original.y, original.z);
-
-        });
-
-        this.isAnimationActive = false;
-        this.animatedSpheres.clear();
-        this.animationTime = 0;
-
-        this.logger.success('Animation gestoppt und Positionen zurückgesetzt');
-    }
 
     /**
      * Animation um einen Frame vorwärts bewegen
@@ -268,70 +228,45 @@ export class Scene {
     }
 
     /**
-     * Animation-Geschwindigkeit setzen
+     * Startet Animation mit angegebener Anzahl von Spheres
      */
-    public setAnimationSpeed(speed: number): void {
-        this.animationSpeed = Math.max(0.1, speed);
-        this.logger.info(`Animation-Geschwindigkeit: ${this.animationSpeed}x`);
+    public startSimpleAnimation(count?: number): void {
+        // Bestimme welche Spheres animiert werden sollen
+        const sphereCount = count !== undefined ? Math.min(count, this.meshes.length) : this.meshes.length;
+
+        this.animatedSpheres.clear();
+
+        // Füge die ersten N Spheres zur Animation hinzu
+        for (let i = 0; i < sphereCount; i++) {
+            this.animatedSpheres.add(i);
+
+            // Speichere Originalposition falls noch nicht vorhanden
+            const sphere = this.meshes[i];
+            if (!sphere.userData.originalPosition) {
+                sphere.userData.originalPosition = sphere.position.clone();
+            }
+        }
+
+        this.isAnimationActive = true;
+        this.animationStartTime = performance.now();
+        this.animationTime = 0;
     }
 
     /**
-     * Aktuelle animierte Kugeln-Indizes abrufen
+     * Stoppt Animation und setzt Spheres zurück
      */
-    public getAnimatedSphereIndices(): number[] {
-        return Array.from(this.animatedSpheres);
-    }
-
-    // ===== BESTEHENDE METHODS (unverändert) =====
-
-    /**
-     * Bewege 2 zufällige Kugeln für Performance-Test
-     */
-    public moveTwoRandomSpheres(): void {
-        if (this.meshes.length < 2) {
-            this.logger.error('Nicht genug Kugeln für Test');
-            return;
-        }
-
-        // 2 zufällige Indizes auswählen
-        const index1 = Math.floor(Math.random() * this.meshes.length);
-        let index2 = Math.floor(Math.random() * this.meshes.length);
-
-        // Sicherstellen, dass index2 != index1
-        while (index2 === index1) {
-            index2 = Math.floor(Math.random() * this.meshes.length);
-        }
-
-        const sphere1 = this.meshes[index1];
-        const sphere2 = this.meshes[index2];
-
-        // Kugeln um +5 Y bewegen
-        sphere1.position.y += 2;
-        sphere2.position.y += 2;
-
-        // Test-Kugeln speichern für Reset
-        this.testSpheres = [index1, index2];
-
-        this.logger.info(`Test-Kugeln verschoben: ${sphere1.name} und ${sphere2.name} um +5 Y`);
-    }
-
-    /**
-     * Test-Kugeln zurücksetzen
-     */
-    public resetTestSpheres(): void {
-        if (this.testSpheres.length === 0) {
-            this.logger.info('Keine Test-Kugeln zu resetten');
-            return;
-        }
-
-        this.testSpheres.forEach(index => {
-            if (index < this.meshes.length) {
-                this.meshes[index].position.y -= 5;
+    public stopAnimation(): void {
+        // Setze alle animierten Spheres auf ihre Originalposition zurück
+        this.animatedSpheres.forEach(index => {
+            const sphere = this.meshes[index];
+            if (sphere.userData.originalPosition) {
+                sphere.position.copy(sphere.userData.originalPosition);
             }
         });
 
-        this.logger.info(`${this.testSpheres.length} Test-Kugeln zurückgesetzt`);
-        this.testSpheres = [];
+        this.isAnimationActive = false;
+        this.animatedSpheres.clear();
+        this.animationTime = 0;
     }
 
     // ===== CORE API METHODEN =====
@@ -391,6 +326,13 @@ export class Scene {
         return this.meshes.length;
     }
 
+    /**
+     * Ground Y-Position für Shader abrufen
+     */
+    public getGroundY(): number {
+        return this.groundMesh.position.y;
+    }
+
     public updateCameraAspect(width: number, height: number): void {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
@@ -448,6 +390,12 @@ export class Scene {
             mesh.geometry.dispose();
             (mesh.material as THREE.Material).dispose();
         });
+
+        // Ground-Mesh aufräumen
+        if (this.groundMesh) {
+            this.groundMesh.geometry.dispose();
+            (this.groundMesh.material as THREE.Material).dispose();
+        }
 
         this.scene.clear();
 

@@ -73,6 +73,7 @@ export class WebGPURaytracerApp {
 
             const lightPosition = this.scene.getPrimaryLightPosition();
             const ambientIntensity = this.scene.getAmbientIntensity();
+            const groundY = this.scene.getGroundY();
 
             this.bufferManager.initialize(
                 this.webgpuDevice.getDevice(),
@@ -81,7 +82,8 @@ export class WebGPURaytracerApp {
                 this.scene.getCameraData(),
                 this.scene.getSpheresData(),
                 lightPosition,
-                ambientIntensity
+                ambientIntensity,
+                groundY
             );
 
             this.pixelCache.initialize(
@@ -134,8 +136,17 @@ export class WebGPURaytracerApp {
 
         this.frameCounter++;
 
+        // Update animation if active
+        const isAnimating = this.scene.isAnimating();
+        if (isAnimating) {
+            this.scene.updateAnimation();
+        }
+
         // Update spheres buffer with current Three.js positions
         this.bufferManager.updateSpheresFromScene(this.scene);
+
+        // Selektive Cache-Invalidierung für bewegte Objekte
+        await this.bufferManager.invalidateForSceneChanges(this.scene);
 
         const startTime = performance.now();
         await this.renderer.renderFrame(this.canvas);

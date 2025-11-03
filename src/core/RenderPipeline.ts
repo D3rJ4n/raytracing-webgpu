@@ -139,33 +139,6 @@ export class RenderPipeline {
         return this.bindGroup;
     }
 
-    public renderFullscreenTriangle(renderPass: GPURenderPassEncoder): void {
-        if (!this.isInitialized()) {
-            throw new Error('Render Pipeline nicht initialisiert');
-        }
-
-        renderPass.setPipeline(this.pipeline!);
-        renderPass.setBindGroup(0, this.bindGroup!);
-        renderPass.draw(3);
-    }
-
-    public executeRenderPass(
-        commandEncoder: GPUCommandEncoder,
-        colorAttachment: GPURenderPassColorAttachment
-    ): void {
-        if (!this.isInitialized()) {
-            throw new Error('Render Pipeline nicht initialisiert');
-        }
-
-        const renderPass = commandEncoder.beginRenderPass({
-            label: 'Fullscreen Render Pass',
-            colorAttachments: [colorAttachment]
-        });
-
-        this.renderFullscreenTriangle(renderPass);
-        renderPass.end();
-    }
-
     public isInitialized(): boolean {
         return this.device !== null &&
             this.renderModule !== null &&

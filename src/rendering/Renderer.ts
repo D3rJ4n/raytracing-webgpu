@@ -94,14 +94,6 @@ export class Renderer {
         renderPass.end();
     }
 
-    public getFrameCount(): number {
-        return this.frameCount;
-    }
-
-    public resetFrameCount(): void {
-        this.frameCount = 0;
-    }
-
     public isInitialized(): boolean {
         return this.device !== null &&
             this.context !== null &&

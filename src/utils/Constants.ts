@@ -137,20 +137,6 @@ export const TEXTURE_CONFIG = {
     LABEL: 'Render Texture',
 } as const;
 
-export const SCENE_CONFIG = {
-
-    GROUND: {
-        Y_POSITION: -1.0,
-        COLOR: { r: 0.8, g: 0.8, b: 0.8 },
-        CHECKERBOARD: true,
-        CHECKER_SIZE: 1.0,
-    },
-    REFLECTIONS: {
-        ENABLED: true,
-        MAX_BOUNCES: 3,
-        MIN_CONTRIBUTION: 0.01,
-    },
-} as const;
 
 export const PERFORMANCE_CONFIG = {
     CACHE_STATS_INTERVAL: 10,

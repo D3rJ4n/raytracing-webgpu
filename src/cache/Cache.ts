@@ -1,11 +1,5 @@
 import { Logger } from "../utils/Logger";
-import { GEOMETRY_CACHE, PERFORMANCE_CONFIG } from "../utils/Constants";
-
-export interface CacheEfficiencyResult {
-    rating: 'Excellent' | 'Good' | 'Fair' | 'Poor';
-    message: string;
-    recommendations: string[];
-}
+import { GEOMETRY_CACHE } from "../utils/Constants";
 
 export class GeometryPixelCache {
     private device: GPUDevice | null = null;
@@ -104,19 +98,6 @@ export class GeometryPixelCache {
         // Removed verbose debug output
     }
 
-    public logStatistics(frameNumber: number): void {
-        this.logger.logCacheStatistics(frameNumber, {
-            totalPixels: this.stats.totalPixels,
-            cacheHits: this.stats.cacheHits,
-            cacheMisses: this.stats.cacheMisses
-        });
-    }
-
-    public async logStatisticsWithRead(frameNumber: number): Promise<void> {
-        await this.readStatistics();
-        this.logStatistics(frameNumber);
-    }
-
     public getHitRate(): number {
         if (this.stats.totalPixels === 0) return 0;
         return (this.stats.cacheHits / this.stats.totalPixels) * 100;
@@ -149,66 +130,6 @@ export class GeometryPixelCache {
         this.stats.cacheMisses = this.stats.totalPixels;
 
         // Removed verbose reset logging
-    }
-
-    public async performanceTest(renderFunction: () => Promise<void | number>, iterations: number = 3): Promise<{
-        averageRenderTime: number;
-        hitRates: number[];
-        totalTime: number;
-    }> {
-        const renderTimes: number[] = [];
-        const hitRates: number[] = [];
-        const startTime = performance.now();
-
-        for (let i = 0; i < iterations; i++) {
-            const frameStart = performance.now();
-            await renderFunction();
-            const frameTime = performance.now() - frameStart;
-            renderTimes.push(frameTime);
-
-            await this.readStatistics();
-            hitRates.push(this.getHitRate());
-
-            await new Promise(resolve => setTimeout(resolve, PERFORMANCE_CONFIG.FRAME_DELAY_MS));
-        }
-
-        const totalTime = performance.now() - startTime;
-        const averageRenderTime = renderTimes.reduce((a, b) => a + b, 0) / renderTimes.length;
-
-        return {
-            averageRenderTime,
-            hitRates,
-            totalTime
-        };
-    }
-
-    public evaluateEfficiency(): CacheEfficiencyResult {
-        const hitRate = this.getHitRate();
-        const recommendations: string[] = [];
-
-        let rating: 'Excellent' | 'Good' | 'Fair' | 'Poor';
-        let message: string;
-
-        if (hitRate >= 90) {
-            rating = 'Excellent';
-            message = 'Optimaler Cache arbeitet ausgezeichnet!';
-        } else if (hitRate >= 70) {
-            rating = 'Good';
-            message = 'Cache funktioniert gut';
-            recommendations.push('Überprüfe ob alle statischen Bereiche gecacht werden');
-        } else if (hitRate >= 40) {
-            rating = 'Fair';
-            message = 'Cache-Effizienz könnte besser sein';
-            recommendations.push('Analysiere Cache-Miss-Patterns');
-            recommendations.push('Überprüfe Cache-Invalidierung-Logik');
-        } else {
-            rating = 'Poor';
-            message = 'Cache arbeitet ineffizient';
-            recommendations.push('Cache-Algorithmus überarbeiten');
-            recommendations.push('Debugging der Cache-Logik erforderlich');
-        }
-
-        return { rating, message, recommendations };
     }
 
     public isInitialized(): boolean {

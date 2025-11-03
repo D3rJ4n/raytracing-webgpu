@@ -6,13 +6,42 @@ export interface SpherePosition {
     z: number;
 }
 
+export interface SphereData {
+    position: SpherePosition;
+    radius: number;
+}
+
 export class GeometryMovementTracker {
     private logger: Logger;
     private lastSpherePositions: Map<number, SpherePosition> = new Map();
+    private lastSphereRadii: Map<number, number> = new Map();
+    private lastCameraData: Float32Array | null = null;
     private sphereMovementThreshold: number = 0.001;
+    private cameraMovementThreshold: number = 0.001;
 
     constructor() {
         this.logger = Logger.getInstance();
+    }
+
+    /**
+     * Kamera-Daten aktualisieren und Änderung erkennen
+     */
+    public updateCameraData(cameraData: Float32Array): boolean {
+        if (!this.lastCameraData) {
+            this.lastCameraData = new Float32Array(cameraData);
+            return false;
+        }
+
+        let changed = false;
+        for (let i = 0; i < Math.min(cameraData.length, this.lastCameraData.length); i++) {
+            if (Math.abs(cameraData[i] - this.lastCameraData[i]) > this.cameraMovementThreshold) {
+                changed = true;
+                break;
+            }
+        }
+
+        this.lastCameraData = new Float32Array(cameraData);
+        return changed;
     }
 
     /**
@@ -23,16 +52,20 @@ export class GeometryMovementTracker {
         const sphereCount = Math.floor(spheresData.length / 8);
 
         for (let i = 0; i < sphereCount; i++) {
-            const currentPosition = this.extractSpherePosition(spheresData, i);
+            const currentData = this.extractSphereData(spheresData, i);
 
-            if (currentPosition) {
+            if (currentData) {
                 const lastPosition = this.lastSpherePositions.get(i);
+                const lastRadius = this.lastSphereRadii.get(i);
 
-                if (lastPosition && this.hasSphereMovedSignificantly(lastPosition, currentPosition)) {
+                if (lastPosition && this.hasSphereMovedSignificantly(lastPosition, currentData.position)) {
+                    movedSpheres.push(i);
+                } else if (lastRadius !== undefined && Math.abs(lastRadius - currentData.radius) > 0.001) {
                     movedSpheres.push(i);
                 }
 
-                this.lastSpherePositions.set(i, { ...currentPosition });
+                this.lastSpherePositions.set(i, { ...currentData.position });
+                this.lastSphereRadii.set(i, currentData.radius);
             }
         }
 
@@ -40,20 +73,23 @@ export class GeometryMovementTracker {
     }
 
     /**
-     * Sphere-Position aus Float32Array extrahieren
+     * Sphere-Daten (Position + Radius) aus Float32Array extrahieren
      */
-    private extractSpherePosition(spheresData: Float32Array, sphereIndex: number): SpherePosition | null {
+    private extractSphereData(spheresData: Float32Array, sphereIndex: number): SphereData | null {
         const offset = sphereIndex * 8;
 
-        if (offset + 2 >= spheresData.length) {
+        if (offset + 3 >= spheresData.length) {
             return null;
         }
 
         return {
-            x: spheresData[offset + 0],
-            y: spheresData[offset + 1],
-            z: spheresData[offset + 2]
-        };//optimierung in arbeit erwähnen 
+            position: {
+                x: spheresData[offset + 0],
+                y: spheresData[offset + 1],
+                z: spheresData[offset + 2]
+            },
+            radius: spheresData[offset + 3]
+        };
     }
 
     /**
@@ -80,12 +116,23 @@ export class GeometryMovementTracker {
      */
     public clearAllPositions(): void {
         this.lastSpherePositions.clear();
+        this.lastSphereRadii.clear();
+    }
+
+    /**
+     * Stats zurücksetzen
+     */
+    public reset(): void {
+        this.lastSpherePositions.clear();
+        this.lastSphereRadii.clear();
+        this.lastCameraData = null;
     }
 
     /**
      * Cleanup
      */
     public cleanup(): void {
-        this.lastSpherePositions.clear();
+        this.reset();
+        this.logger.cache('MovementTracker aufgeräumt');
     }
 }

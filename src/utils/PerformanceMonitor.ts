@@ -26,7 +26,7 @@ export class PerformanceMonitor {
 
     // ===== UI DISPLAY =====
     private displayElement: HTMLDivElement | null = null;
-    private isDisplayVisible: boolean = false;
+    private isDisplayVisible: boolean = true;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -65,7 +65,7 @@ export class PerformanceMonitor {
                 font-size: 14px;
                 z-index: 1000;
                 min-width: 250px;
-                display: none;
+                display: block;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
             `;
             document.body.appendChild(this.displayElement);
@@ -190,7 +190,7 @@ export class PerformanceMonitor {
             <div style="line-height: 1.8;">
                 <div><strong>FPS:</strong> ${currentFPS.toFixed(1)}</div>
                 <div><strong>Frame:</strong> ${currentFrame.toFixed(2)}ms</div>
-                <div><strong>Cache:</strong> ${stats.cache.hitRate.toFixed(1)}%</div>
+                <div><strong>Avg Frame:</strong> ${stats.frameTime.average.toFixed(2)}ms</div>
             </div>
         `;
 
