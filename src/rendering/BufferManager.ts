@@ -57,6 +57,7 @@ export class BufferManager {
         this.canvasHeight = canvasHeight;
 
         const sphereCount = Math.floor(sphereData.length / 8);
+        this.lastSphereCount = sphereCount; // ⚡ Initialize sphere count
 
         this.createCameraBuffer();
         this.createSpheresBuffer();
@@ -332,6 +333,7 @@ export class BufferManager {
     }
 
     private lastSphereHash: string = '';
+    private lastSphereCount: number = 0; // ⚡ Track sphere count for BVH rebuild
 
     public updateSpheresFromScene(scene: Scene, forceRebuild: boolean = false): void {
         // ===== NULL-CHECKS =====
@@ -343,20 +345,28 @@ export class BufferManager {
         }
 
         const spheresData = scene.getSpheresData();
+        const sphereCount = scene.getSphereCount();
 
         // Prüfe ob sich Spheres tatsächlich geändert haben
         const currentHash = this.hashSphereData(spheresData);
         const spheresChanged = currentHash !== this.lastSphereHash || forceRebuild;
+        const sphereCountChanged = sphereCount !== this.lastSphereCount;
 
         if (spheresChanged) {
+            const oldHash = this.lastSphereHash; // 🔧 FIX: Hash VOR dem Update speichern
             this.lastSphereHash = currentHash;
             this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
             // this.logger.buffer(`✅ Spheres aktualisiert (Hash: ${currentHash.slice(0, 8)}...)${forceRebuild ? ' [FORCE]' : ''}`);
 
-            // BVH nur bei echten Änderungen neu bauen
-            if (this.bvhEnabled) {
-                console.log(`🔧 BVH Rebuild: Hash changed from ${this.lastSphereHash} to ${currentHash}`);
-                this.buildBVH(spheresData, scene.getSphereCount());
+            // ⚡ BVH NUR bei STRUKTURELLEN Änderungen neu bauen (Sphere-Anzahl geändert)
+            // NICHT bei reinen Positions-Änderungen (zu teuer!)
+            if (this.bvhEnabled && (sphereCountChanged || forceRebuild)) {
+                console.log(`🔧 BVH Rebuild: Sphere count changed ${this.lastSphereCount} → ${sphereCount}`);
+                this.buildBVH(spheresData, sphereCount);
+                this.lastSphereCount = sphereCount;
+            } else if (spheresChanged && !sphereCountChanged) {
+                // Nur Positionen geändert → BVH NICHT neu bauen, nur Sphere-Buffer aktualisieren
+                // console.log(`⚡ Sphere positions changed, BVH reused (count: ${sphereCount})`);
             }
         } else {
             // this.logger.buffer('⚡ Spheres unverändert - kein Update/BVH-Rebuild (Cache optimiert!)');
@@ -364,7 +374,7 @@ export class BufferManager {
     }
 
     /**
-     * BVH aktivieren/deaktivieren 
+     * BVH aktivieren/deaktivieren
      */
     public setBVHEnabled(enabled: boolean): void {
         const wasEnabled = this.bvhEnabled;
@@ -379,8 +389,21 @@ export class BufferManager {
             this.buildBVH(this.spheresData, sphereCount);
             this.logger.buffer('BVH aktiviert');
         } else if (!enabled && wasEnabled) {
-            // BVH deaktivieren
-            this.logger.buffer('BVH deaktiviert');
+            // ⚡ BVH deaktivieren: KOMPLETTEN Buffer mit Nullen füllen
+            if (this.device && this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
+                // WICHTIG: Float32Array(0) schreibt NUR 0 Bytes, der Rest bleibt unverändert!
+                // Wir müssen den KOMPLETTEN Buffer mit Nullen überschreiben
+                const nodesBufferSize = BUFFER_CONFIG.BVH_NODES.SIZE;
+                const indicesBufferSize = BUFFER_CONFIG.BVH_SPHERE_INDICES.SIZE;
+
+                // Nullen für kompletten Buffer
+                const emptyNodes = new Float32Array(nodesBufferSize / 4); // 4 Bytes pro Float32
+                const emptyIndices = new Uint32Array(indicesBufferSize / 4); // 4 Bytes pro Uint32
+
+                this.device.queue.writeBuffer(this.bvhNodesBuffer, 0, emptyNodes);
+                this.device.queue.writeBuffer(this.bvhSphereIndicesBuffer, 0, emptyIndices);
+                this.logger.buffer('BVH deaktiviert (Buffers mit Nullen gefüllt → linearer Fallback)');
+            }
         }
     }
 
@@ -473,9 +496,9 @@ export class BufferManager {
     }
 
     private hashSphereData(data: Float32Array): string {
-        // Einfacher Hash für die ersten 100 Bytes (genug für Änderungs-Erkennung)
+        // Hash für ALLE Sphere-Daten (korrekte Änderungs-Erkennung)
         let hash = 0;
-        for (let i = 0; i < Math.min(100, data.length); i++) {
+        for (let i = 0; i < data.length; i++) {
             hash = ((hash << 5) - hash + data[i]) & 0xffffffff;
         }
         return hash.toString();

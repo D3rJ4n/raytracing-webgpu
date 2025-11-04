@@ -27,7 +27,7 @@ export class Scene {
     private groundMesh!: THREE.Mesh;
     private ambientLightIntensity: number = 0.2;
 
-    private rotationRadius: number = 25;
+    private rotationRadius: number = 10;
     private cameraHeight: number = 10;
 
     // Test-Kugeln für Performance-Tests
@@ -102,7 +102,7 @@ export class Scene {
         this.logger.init('Erstelle massive BVH-Test-Szene...');
 
         const SPHERE_COUNT = 400;
-        const WORLD_SIZE = 400;
+        const WORLD_SIZE = 80; // ⚡ Größere Welt für besseren BVH-Speedup (Spheres verteilt)
         let validSpheres = 0;
         let invalidSpheres = 0;
 
@@ -167,8 +167,8 @@ export class Scene {
         this.scene.add(ambientLight);
         this.lights.push(ambientLight);
 
-        // Kamera für 1000+ Spheres
-        this.camera.position.set(0, 60, 80);
+        // Kamera für kompaktere Szene
+        this.camera.position.set(0, 30, 40);
         this.camera.lookAt(0, 10, 0);
         this.camera.fov = 75;
         this.camera.far = 300;

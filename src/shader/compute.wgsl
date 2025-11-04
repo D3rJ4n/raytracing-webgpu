@@ -352,16 +352,49 @@ fn traverseBVH(ray: Ray) -> HitRecord {
     return closest;
 }
 
+// ===== LINEAR TRAVERSIERUNG (Fallback ohne BVH) =====
+
+fn traverseLinear(ray: Ray) -> HitRecord {
+    var closest: HitRecord;
+    closest.hit = false;
+    closest.t = 1e20;
+
+    // Teste alle Spheres linear
+    for (var i = 0u; i < renderInfo.sphereCount; i++) {
+        let t = intersectSphere(ray.origin, ray.direction, i);
+        if (t > 0.0 && t < closest.t) {
+            closest.hit = true;
+            closest.t = t;
+            closest.point = ray.origin + ray.direction * t;
+            closest.normal = normalize(closest.point - spheres[i].center);
+            closest.material = i;
+            closest.color = spheres[i].color;
+            closest.metallic = spheres[i].metallic;
+        }
+    }
+
+    return closest;
+}
+
 // ===== CLOSEST HIT (erweitert um optionale BVH) =====
 
 fn findClosestHit(ray: Ray) -> HitRecord {
     var closest: HitRecord;
     closest.hit = false;
     closest.t = 999999.0;
-    
-    // ===== FORCE BVH - IGNORIERE arrayLength CHECK =====
-    closest = traverseBVH(ray);
-    
+
+    // ⚡ BVH vs. Linear: Prüfe ob BVH-Daten GÜLTIG sind
+    // WICHTIG: arrayLength() gibt Buffer-Größe zurück, nicht Anzahl gültiger Elemente!
+    // Wir prüfen stattdessen ob der Root-Node valide ist (minBound != 0)
+    let rootMinX = bvhNodes[0];
+    let bvhAvailable = rootMinX != 0.0;
+
+    if (bvhAvailable) {
+        closest = traverseBVH(ray);
+    } else {
+        closest = traverseLinear(ray);
+    }
+
     // Ground-Plane separat testen (nicht in BVH) - unverändert
     let tPlane = intersectPlane(ray.origin, ray.direction, sceneConfig.groundY);
     if (tPlane > 0.0 && tPlane < closest.t) {
@@ -373,7 +406,7 @@ fn findClosestHit(ray: Ray) -> HitRecord {
         closest.color = vec3<f32>(0.6, 0.6, 0.6);
         closest.metallic = 0.0;
     }
-    
+
     return closest;
 }
 

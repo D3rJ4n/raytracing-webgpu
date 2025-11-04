@@ -139,7 +139,7 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         await app.renderFrame(); // Cache aufbauen
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        app.scene.startSimpleAnimation();
+        app.scene.startSimpleAnimation(10); // ⚡ FIX: Nur 10 Spheres animieren statt alle 400!
 
         const selectiveTimes: number[] = [];
         const selectiveInvalidated: number[] = [];
@@ -277,6 +277,183 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
 
         // Placeholder - benötigt erweiterte Scene API für variable Sphere-Anzahl
         console.log('TODO: Implementierung wenn Scene.animateSpecificSpheres(count) verfügbar ist');
+    };
+
+    // ===== UMFASSENDER PERFORMANCE-TEST: ALLE KOMBINATIONEN =====
+    (window as any).testFullPerformanceMatrix = async () => {
+        console.log('\n╔════════════════════════════════════════════════════╗');
+        console.log('║  UMFASSENDER PERFORMANCE-TEST                      ║');
+        console.log('║  Teste alle BVH + Cache Kombinationen             ║');
+        console.log('╚════════════════════════════════════════════════════╝\n');
+
+        const results: any = {
+            noBvhNoCache: null,
+            bvhNoCache: null,
+            noBvhCache: null,
+            bvhCache: null
+        };
+
+        const frameCount = 20;
+        const warmupFrames = 3;
+
+        // ===== TEST 1: OHNE BVH, OHNE CACHE (BASELINE) =====
+        console.log('🔧 TEST 1/4: OHNE BVH, OHNE CACHE (Baseline - Worst Case)');
+        app.bufferManager.setBVHEnabled(false);
+
+        const noBvhNoCacheTimes: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            app.resetCache(); // Kein Cache
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+
+            if (i >= warmupFrames) {
+                noBvhNoCacheTimes.push(frameTime);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        results.noBvhNoCache = {
+            avg: noBvhNoCacheTimes.reduce((a, b) => a + b) / noBvhNoCacheTimes.length,
+            min: Math.min(...noBvhNoCacheTimes),
+            max: Math.max(...noBvhNoCacheTimes),
+            fps: 1000 / (noBvhNoCacheTimes.reduce((a, b) => a + b) / noBvhNoCacheTimes.length)
+        };
+        console.log(`  ✅ Durchschnitt: ${results.noBvhNoCache.avg.toFixed(2)}ms (${results.noBvhNoCache.fps.toFixed(1)} FPS)\n`);
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // ===== TEST 2: MIT BVH, OHNE CACHE =====
+        console.log('🔧 TEST 2/4: MIT BVH, OHNE CACHE');
+        app.bufferManager.setBVHEnabled(true);
+
+        const bvhNoCacheTimes: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            app.resetCache(); // Kein Cache
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+
+            if (i >= warmupFrames) {
+                bvhNoCacheTimes.push(frameTime);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        results.bvhNoCache = {
+            avg: bvhNoCacheTimes.reduce((a, b) => a + b) / bvhNoCacheTimes.length,
+            min: Math.min(...bvhNoCacheTimes),
+            max: Math.max(...bvhNoCacheTimes),
+            fps: 1000 / (bvhNoCacheTimes.reduce((a, b) => a + b) / bvhNoCacheTimes.length)
+        };
+        console.log(`  ✅ Durchschnitt: ${results.bvhNoCache.avg.toFixed(2)}ms (${results.bvhNoCache.fps.toFixed(1)} FPS)\n`);
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // ===== TEST 3: OHNE BVH, MIT CACHE + INVALIDIERUNG =====
+        console.log('🔧 TEST 3/4: OHNE BVH, MIT CACHE + INVALIDIERUNG');
+        app.bufferManager.setBVHEnabled(false);
+        app.resetCache();
+
+        // Cache warmup
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // Animation starten
+        app.scene.startSimpleAnimation(10);
+
+        const noBvhCacheTimes: number[] = [];
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            noBvhCacheTimes.push(frameTime);
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        app.scene.stopAnimation();
+
+        results.noBvhCache = {
+            avg: noBvhCacheTimes.reduce((a, b) => a + b) / noBvhCacheTimes.length,
+            min: Math.min(...noBvhCacheTimes),
+            max: Math.max(...noBvhCacheTimes),
+            fps: 1000 / (noBvhCacheTimes.reduce((a, b) => a + b) / noBvhCacheTimes.length)
+        };
+        console.log(`  ✅ Durchschnitt: ${results.noBvhCache.avg.toFixed(2)}ms (${results.noBvhCache.fps.toFixed(1)} FPS)\n`);
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // ===== TEST 4: MIT BVH + CACHE + INVALIDIERUNG (BEST CASE) =====
+        console.log('🔧 TEST 4/4: MIT BVH + CACHE + INVALIDIERUNG (Best Case)');
+        app.bufferManager.setBVHEnabled(true);
+        app.resetCache();
+
+        // Cache warmup
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // Animation starten
+        app.scene.startSimpleAnimation(10);
+
+        const bvhCacheTimes: number[] = [];
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            bvhCacheTimes.push(frameTime);
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        app.scene.stopAnimation();
+
+        results.bvhCache = {
+            avg: bvhCacheTimes.reduce((a, b) => a + b) / bvhCacheTimes.length,
+            min: Math.min(...bvhCacheTimes),
+            max: Math.max(...bvhCacheTimes),
+            fps: 1000 / (bvhCacheTimes.reduce((a, b) => a + b) / bvhCacheTimes.length)
+        };
+        console.log(`  ✅ Durchschnitt: ${results.bvhCache.avg.toFixed(2)}ms (${results.bvhCache.fps.toFixed(1)} FPS)\n`);
+
+        // ===== ZUSAMMENFASSUNG =====
+        const baseline = results.noBvhNoCache.avg;
+
+        console.log('\n╔═══════════════════════════════════════════════════════════════════════════════╗');
+        console.log('║                       PERFORMANCE ZUSAMMENFASSUNG                             ║');
+        console.log('╠═══════════════════════════════════════════════════════════════════════════════╣');
+        console.log('║                                                                               ║');
+        console.log('║  Konfiguration               │  Avg Time  │    FPS    │  Speedup  │  Rating  ║');
+        console.log('║──────────────────────────────┼────────────┼───────────┼───────────┼─────────║');
+        console.log(`║  1. OHNE BVH, OHNE Cache     │  ${results.noBvhNoCache.avg.toFixed(2).padStart(6)}ms  │  ${results.noBvhNoCache.fps.toFixed(1).padStart(6)}  │   1.0x    │  ⚠️ Worst ║`);
+        console.log(`║  2. MIT BVH, OHNE Cache      │  ${results.bvhNoCache.avg.toFixed(2).padStart(6)}ms  │  ${results.bvhNoCache.fps.toFixed(1).padStart(6)}  │   ${(baseline / results.bvhNoCache.avg).toFixed(1)}x    │  ${results.bvhNoCache.avg < baseline * 0.5 ? '✅' : '⚡'} Good  ║`);
+        console.log(`║  3. OHNE BVH, MIT Cache      │  ${results.noBvhCache.avg.toFixed(2).padStart(6)}ms  │  ${results.noBvhCache.fps.toFixed(1).padStart(6)}  │   ${(baseline / results.noBvhCache.avg).toFixed(1)}x    │  ${results.noBvhCache.avg < baseline * 0.3 ? '✅' : '⚡'} Good  ║`);
+        console.log(`║  4. MIT BVH + Cache (Best)   │  ${results.bvhCache.avg.toFixed(2).padStart(6)}ms  │  ${results.bvhCache.fps.toFixed(1).padStart(6)}  │   ${(baseline / results.bvhCache.avg).toFixed(1)}x    │  🚀 Best  ║`);
+        console.log('║                                                                               ║');
+        console.log('╠═══════════════════════════════════════════════════════════════════════════════╣');
+        console.log('║                           SPEEDUP ANALYSE                                     ║');
+        console.log('╠═══════════════════════════════════════════════════════════════════════════════╣');
+        console.log(`║  BVH Speedup (ohne Cache):     ${(results.noBvhNoCache.avg / results.bvhNoCache.avg).toFixed(2)}x schneller                                  ║`);
+        console.log(`║  Cache Speedup (ohne BVH):     ${(results.noBvhNoCache.avg / results.noBvhCache.avg).toFixed(2)}x schneller                                  ║`);
+        console.log(`║  BVH + Cache Speedup:          ${(results.noBvhNoCache.avg / results.bvhCache.avg).toFixed(2)}x schneller (Best!)                           ║`);
+        console.log('║                                                                               ║');
+        console.log(`║  Synergy Bonus:                ${((results.noBvhNoCache.avg / results.bvhCache.avg) / ((results.noBvhNoCache.avg / results.bvhNoCache.avg) + (results.noBvhNoCache.avg / results.noBvhCache.avg) - 1)).toFixed(2)}x (BVH×Cache > BVH+Cache)                     ║`);
+        console.log('╚═══════════════════════════════════════════════════════════════════════════════╝\n');
+
+        // Detailstatistiken
+        console.log('📊 DETAILSTATISTIKEN:');
+        console.log('────────────────────────────────────────────────────────────────────────────────');
+        console.log(`Ohne BVH, Ohne Cache:  Min: ${results.noBvhNoCache.min.toFixed(2)}ms (${(1000/results.noBvhNoCache.min).toFixed(1)} FPS), Max: ${results.noBvhNoCache.max.toFixed(2)}ms (${(1000/results.noBvhNoCache.max).toFixed(1)} FPS)`);
+        console.log(`Mit BVH, Ohne Cache:   Min: ${results.bvhNoCache.min.toFixed(2)}ms (${(1000/results.bvhNoCache.min).toFixed(1)} FPS), Max: ${results.bvhNoCache.max.toFixed(2)}ms (${(1000/results.bvhNoCache.max).toFixed(1)} FPS)`);
+        console.log(`Ohne BVH, Mit Cache:   Min: ${results.noBvhCache.min.toFixed(2)}ms (${(1000/results.noBvhCache.min).toFixed(1)} FPS), Max: ${results.noBvhCache.max.toFixed(2)}ms (${(1000/results.noBvhCache.max).toFixed(1)} FPS)`);
+        console.log(`Mit BVH + Cache:       Min: ${results.bvhCache.min.toFixed(2)}ms (${(1000/results.bvhCache.min).toFixed(1)} FPS), Max: ${results.bvhCache.max.toFixed(2)}ms (${(1000/results.bvhCache.max).toFixed(1)} FPS)`);
+        console.log('────────────────────────────────────────────────────────────────────────────────\n');
+
+        return results;
     };
 
     // ===== HELPER: ALLE TESTS AUSFÜHREN =====

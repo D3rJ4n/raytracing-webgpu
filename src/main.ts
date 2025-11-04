@@ -27,6 +27,7 @@ async function main(): Promise<void> {
         console.log('  • testSingleSphere() - Selektive Invalidierung (Animation)');
         console.log('  • testSelectiveVsFull() - Vergleich selektiv vs. komplett');
         console.log('  • testCameraMovement() - Worst-Case (Kamera-Bewegung)');
+        console.log('  • testFullPerformanceMatrix() - ⭐ VOLLSTÄNDIGER TEST (alle BVH+Cache Kombinationen)');
         console.log('  • runAllTests() - Alle Tests nacheinander ausführen\n');
 
     } catch (error) {
