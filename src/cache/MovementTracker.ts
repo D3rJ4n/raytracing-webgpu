@@ -16,7 +16,7 @@ export class GeometryMovementTracker {
     private lastSpherePositions: Map<number, SpherePosition> = new Map();
     private lastSphereRadii: Map<number, number> = new Map();
     private lastCameraData: Float32Array | null = null;
-    private sphereMovementThreshold: number = 0.001;
+    private sphereMovementThreshold: number = 0.00001; // Sehr sensitiv für Animation!
     private cameraMovementThreshold: number = 0.001;
 
     constructor() {

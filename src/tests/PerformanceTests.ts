@@ -477,4 +477,384 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         console.log('║  ALLE TESTS ABGESCHLOSSEN             ║');
         console.log('╚═══════════════════════════════════════╝\n');
     };
+
+    // ===== UMFASSENDE TEST-SUITE: STATISCH, MOVED, ANIMIERT =====
+    (window as any).testComprehensive = async () => {
+        console.log('\n╔════════════════════════════════════════════════════════════════════╗');
+        console.log('║  UMFASSENDE TEST-SUITE                                             ║');
+        console.log('║  Kategorie 1: Statisches Bild                                      ║');
+        console.log('║  Kategorie 2: Moved Spheres (2 Kugeln einmalig verschieben)      ║');
+        console.log('║  Kategorie 3: Animierte Spheres (2 Kugeln kontinuierlich)        ║');
+        console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+
+        const allResults: any = {};
+        const frameCount = 20;
+        const warmupFrames = 3;
+
+        // ===== KATEGORIE 1: STATISCHES BILD =====
+        console.log('\n╔══════════════════════════════════════════════════════════════╗');
+        console.log('║  KATEGORIE 1: STATISCHES BILD (keine Bewegung)              ║');
+        console.log('╚══════════════════════════════════════════════════════════════╝\n');
+
+        // Test 1.1: Ohne BVH, Ohne Cache
+        console.log('🔧 Test 1.1: OHNE BVH, OHNE Cache (Statisch)');
+        app.bufferManager.setBVHEnabled(false);
+
+        const static_noBvhNoCache: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            app.resetCache(); // Cache vor JEDEM Frame resetten
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            if (i >= warmupFrames) static_noBvhNoCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.static_noBvhNoCache = {
+            avg: static_noBvhNoCache.reduce((a, b) => a + b) / static_noBvhNoCache.length,
+            min: Math.min(...static_noBvhNoCache),
+            max: Math.max(...static_noBvhNoCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.static_noBvhNoCache.avg.toFixed(2)}ms\n`);
+
+        // Test 1.2: Mit BVH, Ohne Cache
+        console.log('🔧 Test 1.2: MIT BVH, OHNE Cache (Statisch)');
+        app.bufferManager.setBVHEnabled(true); // BVH wird hier gebaut
+
+        const static_bvhNoCache: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            app.resetCache(); // Cache vor JEDEM Frame resetten
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            if (i >= warmupFrames) static_bvhNoCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.static_bvhNoCache = {
+            avg: static_bvhNoCache.reduce((a, b) => a + b) / static_bvhNoCache.length,
+            min: Math.min(...static_bvhNoCache),
+            max: Math.max(...static_bvhNoCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.static_bvhNoCache.avg.toFixed(2)}ms\n`);
+
+        // Test 1.3: Ohne BVH, Mit Cache (KEIN Reset zwischen Frames!)
+        console.log('🔧 Test 1.3: OHNE BVH, MIT Cache (Statisch)');
+        app.bufferManager.setBVHEnabled(false);
+        // KEIN app.resetCache() - Cache bleibt von Test 1.2 erhalten und baut sich auf!
+
+        const static_noBvhCache: number[] = [];
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame(); // Cache bleibt erhalten!
+            const frameTime = performance.now() - start;
+            static_noBvhCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.static_noBvhCache = {
+            avg: static_noBvhCache.reduce((a, b) => a + b) / static_noBvhCache.length,
+            min: Math.min(...static_noBvhCache),
+            max: Math.max(...static_noBvhCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.static_noBvhCache.avg.toFixed(2)}ms\n`);
+
+        // Test 1.4: Mit BVH, Mit Cache (KEIN Reset zwischen Frames!)
+        console.log('🔧 Test 1.4: MIT BVH, MIT Cache (Statisch)');
+        app.bufferManager.setBVHEnabled(true); // BVH muss NICHT neu gebaut werden (keine Geometrie-Änderung!)
+        // KEIN app.resetCache() - Cache bleibt erhalten!
+
+        const static_bvhCache: number[] = [];
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame(); // Cache bleibt erhalten!
+            const frameTime = performance.now() - start;
+            static_bvhCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.static_bvhCache = {
+            avg: static_bvhCache.reduce((a, b) => a + b) / static_bvhCache.length,
+            min: Math.min(...static_bvhCache),
+            max: Math.max(...static_bvhCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.static_bvhCache.avg.toFixed(2)}ms\n`);
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // ===== KATEGORIE 2: MOVED SPHERES (2 Kugeln einmalig verschieben) =====
+        console.log('\n╔══════════════════════════════════════════════════════════════╗');
+        console.log('║  KATEGORIE 2: MOVED SPHERES (2 Kugeln einmalig verschieben) ║');
+        console.log('╚══════════════════════════════════════════════════════════════╝\n');
+
+        // Funktion zum Verschieben von 2 Kugeln
+        const moveTwoSpheres = () => {
+            const sphere0 = app.scene.getThreeScene().children.find(obj => obj.name.includes('MassiveSphere_0'));
+            const sphere1 = app.scene.getThreeScene().children.find(obj => obj.name.includes('MassiveSphere_1'));
+            if (sphere0) {
+                sphere0.position.x += 1.0;
+                console.log('✅ Sphere 0 verschoben zu x=' + sphere0.position.x);
+            } else {
+                console.warn('❌ Sphere 0 nicht gefunden!');
+            }
+            if (sphere1) {
+                sphere1.position.z += 1.0;
+                console.log('✅ Sphere 1 verschoben zu z=' + sphere1.position.z);
+            } else {
+                console.warn('❌ Sphere 1 nicht gefunden!');
+            }
+        };
+
+        // Test 2.1: Ohne BVH, Ohne Cache (Moved)
+        console.log('🔧 Test 2.1: OHNE BVH, OHNE Cache (2 Kugeln moved)');
+        app.bufferManager.setBVHEnabled(false);
+
+        const moved_noBvhNoCache: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            if (i === warmupFrames) moveTwoSpheres(); // Verschiebe NACH warmup
+            app.resetCache(); // Cache vor jedem Frame resetten
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            if (i >= warmupFrames) moved_noBvhNoCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.moved_noBvhNoCache = {
+            avg: moved_noBvhNoCache.reduce((a, b) => a + b) / moved_noBvhNoCache.length,
+            min: Math.min(...moved_noBvhNoCache),
+            max: Math.max(...moved_noBvhNoCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.moved_noBvhNoCache.avg.toFixed(2)}ms\n`);
+
+        // Test 2.2: Mit BVH, Ohne Cache (Moved)
+        console.log('🔧 Test 2.2: MIT BVH, OHNE Cache (2 Kugeln moved)');
+        // Spheres zurücksetzen (NICHT clearSpheres/initialize wegen WebGPU Memory!)
+        app.scene.resetAllSpheresToOriginalPositions();
+
+        app.bufferManager.setBVHEnabled(true); // BVH wird hier gebaut
+
+        const moved_bvhNoCache: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            if (i === warmupFrames) moveTwoSpheres(); // BVH wird nach Move NEU GEBAUT (geometry change!)
+            app.resetCache(); // Cache vor jedem Frame resetten
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            if (i >= warmupFrames) moved_bvhNoCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.moved_bvhNoCache = {
+            avg: moved_bvhNoCache.reduce((a, b) => a + b) / moved_bvhNoCache.length,
+            min: Math.min(...moved_bvhNoCache),
+            max: Math.max(...moved_bvhNoCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.moved_bvhNoCache.avg.toFixed(2)}ms\n`);
+
+        // Test 2.3: Ohne BVH, Mit Cache (Moved)
+        console.log('🔧 Test 2.3: OHNE BVH, MIT Cache (2 Kugeln moved)');
+        // Spheres zurücksetzen
+        app.scene.resetAllSpheresToOriginalPositions();
+
+        app.bufferManager.setBVHEnabled(false);
+        // KEIN app.resetCache() - Cache bleibt erhalten!
+
+        // Warmup MIT Cache
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        moveTwoSpheres(); // Verschiebe → Cache wird selektiv invalidiert
+
+        const moved_noBvhCache: number[] = [];
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame(); // Cache bleibt erhalten (außer invalidierte Bereiche)
+            const frameTime = performance.now() - start;
+            moved_noBvhCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.moved_noBvhCache = {
+            avg: moved_noBvhCache.reduce((a, b) => a + b) / moved_noBvhCache.length,
+            min: Math.min(...moved_noBvhCache),
+            max: Math.max(...moved_noBvhCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.moved_noBvhCache.avg.toFixed(2)}ms\n`);
+
+        // Test 2.4: Mit BVH, Mit Cache (Moved)
+        console.log('🔧 Test 2.4: MIT BVH, MIT Cache (2 Kugeln moved)');
+        // Spheres zurücksetzen
+        app.scene.resetAllSpheresToOriginalPositions();
+
+        app.bufferManager.setBVHEnabled(true);
+        // KEIN app.resetCache() - Cache bleibt erhalten!
+
+        // Warmup MIT Cache
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        moveTwoSpheres(); // BVH wird neu gebaut, Cache selektiv invalidiert
+
+        const moved_bvhCache: number[] = [];
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame(); // Cache bleibt erhalten
+            const frameTime = performance.now() - start;
+            moved_bvhCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        allResults.moved_bvhCache = {
+            avg: moved_bvhCache.reduce((a, b) => a + b) / moved_bvhCache.length,
+            min: Math.min(...moved_bvhCache),
+            max: Math.max(...moved_bvhCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.moved_bvhCache.avg.toFixed(2)}ms\n`);
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // ===== KATEGORIE 3: ANIMIERTE SPHERES (2 Kugeln) =====
+        console.log('\n╔══════════════════════════════════════════════════════════════╗');
+        console.log('║  KATEGORIE 3: ANIMIERTE SPHERES (2 Kugeln kontinuierlich)   ║');
+        console.log('╚══════════════════════════════════════════════════════════════╝\n');
+
+        // Spheres zurücksetzen für Animation-Tests
+        app.scene.resetAllSpheresToOriginalPositions();
+
+        // Test 3.1: Ohne BVH, Ohne Cache, Animation
+        console.log('🔧 Test 3.1: OHNE BVH, OHNE Cache (Animiert - 2 Kugeln)');
+        app.bufferManager.setBVHEnabled(false);
+
+        app.scene.startSimpleAnimation(2);
+
+        const anim_noBvhNoCache: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            app.resetCache(); // Cache vor jedem Frame resetten
+            const start = performance.now();
+            await app.renderFrame();
+            const frameTime = performance.now() - start;
+            if (i >= warmupFrames) anim_noBvhNoCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        app.scene.stopAnimation();
+
+        allResults.anim_noBvhNoCache = {
+            avg: anim_noBvhNoCache.reduce((a, b) => a + b) / anim_noBvhNoCache.length,
+            min: Math.min(...anim_noBvhNoCache),
+            max: Math.max(...anim_noBvhNoCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.anim_noBvhNoCache.avg.toFixed(2)}ms\n`);
+
+        // Test 3.2: Mit BVH, Ohne Cache, Animation
+        console.log('🔧 Test 3.2: MIT BVH, OHNE Cache (Animiert - 2 Kugeln)');
+        app.bufferManager.setBVHEnabled(true); // BVH wird hier gebaut
+
+        app.scene.startSimpleAnimation(2);
+
+        const anim_bvhNoCache: number[] = [];
+        for (let i = 0; i < frameCount + warmupFrames; i++) {
+            app.resetCache(); // Cache vor jedem Frame resetten
+            const start = performance.now();
+            await app.renderFrame(); // BVH wird JEDEN Frame neu gebaut (geometry changes!)
+            const frameTime = performance.now() - start;
+            if (i >= warmupFrames) anim_bvhNoCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        app.scene.stopAnimation();
+
+        allResults.anim_bvhNoCache = {
+            avg: anim_bvhNoCache.reduce((a, b) => a + b) / anim_bvhNoCache.length,
+            min: Math.min(...anim_bvhNoCache),
+            max: Math.max(...anim_bvhNoCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.anim_bvhNoCache.avg.toFixed(2)}ms\n`);
+
+        // Test 3.3: Ohne BVH, Mit Cache, Animation
+        console.log('🔧 Test 3.3: OHNE BVH, MIT Cache (Animiert - 2 Kugeln)');
+        app.bufferManager.setBVHEnabled(false);
+        // KEIN app.resetCache() - Cache bleibt erhalten!
+
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        app.scene.startSimpleAnimation(2);  // Nur 2 Kugeln animieren!
+
+        const anim_noBvhCache: number[] = [];
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame(); // Cache wird selektiv invalidiert bei Bewegung
+            const frameTime = performance.now() - start;
+            anim_noBvhCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        app.scene.stopAnimation();
+
+        allResults.anim_noBvhCache = {
+            avg: anim_noBvhCache.reduce((a, b) => a + b) / anim_noBvhCache.length,
+            min: Math.min(...anim_noBvhCache),
+            max: Math.max(...anim_noBvhCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.anim_noBvhCache.avg.toFixed(2)}ms\n`);
+
+        // Test 3.4: Mit BVH, Mit Cache, Animation
+        console.log('🔧 Test 3.4: MIT BVH, MIT Cache (Animiert - 2 Kugeln)');
+        app.bufferManager.setBVHEnabled(true);
+        // KEIN app.resetCache() - Cache bleibt erhalten!
+
+        for (let i = 0; i < warmupFrames; i++) {
+            await app.renderFrame();
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        app.scene.startSimpleAnimation(2);
+
+        const anim_bvhCache: number[] = [];
+        for (let i = 0; i < frameCount; i++) {
+            const start = performance.now();
+            await app.renderFrame(); // BVH wird neu gebaut + Cache selektiv invalidiert
+            const frameTime = performance.now() - start;
+            anim_bvhCache.push(frameTime);
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        app.scene.stopAnimation();
+
+        allResults.anim_bvhCache = {
+            avg: anim_bvhCache.reduce((a, b) => a + b) / anim_bvhCache.length,
+            min: Math.min(...anim_bvhCache),
+            max: Math.max(...anim_bvhCache)
+        };
+        console.log(`  ✅ Durchschnitt: ${allResults.anim_bvhCache.avg.toFixed(2)}ms\n`);
+
+        // ===== ZUSAMMENFASSUNG =====
+        console.log('\n╔═══════════════════════════════════════════════════════════════════════════════╗');
+        console.log('║                       UMFASSENDE TEST-ZUSAMMENFASSUNG                         ║');
+        console.log('╠═══════════════════════════════════════════════════════════════════════════════╣');
+        console.log('║  KATEGORIE 1: STATISCHES BILD                                                 ║');
+        console.log(`║    1.1 Ohne BVH, Ohne Cache:  ${allResults.static_noBvhNoCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.static_noBvhNoCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.static_noBvhNoCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    1.2 Mit BVH, Ohne Cache:   ${allResults.static_bvhNoCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.static_bvhNoCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.static_bvhNoCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    1.3 Ohne BVH, Mit Cache:   ${allResults.static_noBvhCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.static_noBvhCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.static_noBvhCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    1.4 Mit BVH, Mit Cache:    ${allResults.static_bvhCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.static_bvhCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.static_bvhCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log('║                                                                               ║');
+        console.log('║  KATEGORIE 2: MOVED SPHERES (2 Kugeln einmalig verschieben)                  ║');
+        console.log(`║    2.1 Ohne BVH, Ohne Cache:  ${allResults.moved_noBvhNoCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.moved_noBvhNoCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.moved_noBvhNoCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    2.2 Mit BVH, Ohne Cache:   ${allResults.moved_bvhNoCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.moved_bvhNoCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.moved_bvhNoCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    2.3 Ohne BVH, Mit Cache:   ${allResults.moved_noBvhCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.moved_noBvhCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.moved_noBvhCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    2.4 Mit BVH, Mit Cache:    ${allResults.moved_bvhCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.moved_bvhCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.moved_bvhCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log('║                                                                               ║');
+        console.log('║  KATEGORIE 3: ANIMIERTE SPHERES (2 Kugeln kontinuierlich)                    ║');
+        console.log(`║    3.1 Ohne BVH, Ohne Cache:  ${allResults.anim_noBvhNoCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.anim_noBvhNoCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.anim_noBvhNoCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    3.2 Mit BVH, Ohne Cache:   ${allResults.anim_bvhNoCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.anim_bvhNoCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.anim_bvhNoCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    3.3 Ohne BVH, Mit Cache:   ${allResults.anim_noBvhCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.anim_noBvhCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.anim_noBvhCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log(`║    3.4 Mit BVH, Mit Cache:    ${allResults.anim_bvhCache.avg.toFixed(2).padStart(7)}ms (Min: ${allResults.anim_bvhCache.min.toFixed(2).padStart(7)}ms, Max: ${allResults.anim_bvhCache.max.toFixed(2).padStart(7)}ms)  ║`);
+        console.log('╚═══════════════════════════════════════════════════════════════════════════════╝\n');
+
+        return allResults;
+    };
 }

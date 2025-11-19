@@ -38,6 +38,7 @@ struct SceneConfig {
     maxBounces: f32,
     minContribution: f32,
     ambientStrength: f32,
+    bvhEnabled: f32,
 }
 
 struct HitRecord {
@@ -230,7 +231,7 @@ fn randomFloat2(seed: ptr<function, u32>) -> vec2<f32> {
     return vec2<f32>(randomFloat(seed), randomFloat(seed));
 }
 
-// ===== CAMERA RAY (unverändert aus Ihrem alten Code) =====
+// ===== CAMERA RAY  =====
 
 fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     let aspectRatio = f32(renderInfo.width) / f32(renderInfo.height);
@@ -244,12 +245,12 @@ fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     let halfWidth = halfHeight * aspectRatio;
     
     let x = (uv.x * 2.0 - 1.0) * halfWidth;
-    let y = -(uv.y * 2.0 - 1.0) * halfHeight;  // ✅ KORREKT: Ihr originales Y
+    let y = -(uv.y * 2.0 - 1.0) * halfHeight; 
     
     return normalize(forward + x * right + y * up);
 }
 
-// ===== RAY-SPHERE INTERSECTION (unverändert aus Ihrem alten Code) =====
+// ===== RAY-SPHERE INTERSECTION =====
 
 fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereIndex: u32) -> f32 {
     let sphere = spheres[sphereIndex];
@@ -275,7 +276,7 @@ fn intersectSphere(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereIndex: u
     return -1.0;
 }
 
-// ===== RAY-PLANE INTERSECTION (unverändert aus Ihrem alten Code) =====
+// ===== RAY-PLANE INTERSECTION =====
 
 fn intersectPlane(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, planeY: f32) -> f32 {
     if (abs(rayDirection.y) < 0.0001) {
@@ -288,7 +289,7 @@ fn intersectPlane(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, planeY: f32) ->
     return -1.0;
 }
 
-// ===== BVH TRAVERSIERUNG (NEU - aber optional) =====
+// ===== BVH TRAVERSIERUNG =====
 
 fn traverseBVH(ray: Ray) -> HitRecord {
     var closest: HitRecord;
@@ -352,7 +353,7 @@ fn traverseBVH(ray: Ray) -> HitRecord {
     return closest;
 }
 
-// ===== LINEAR TRAVERSIERUNG (Fallback ohne BVH) =====
+// ===== LINEAR TRAVERSIERUNG =====
 
 fn traverseLinear(ray: Ray) -> HitRecord {
     var closest: HitRecord;
@@ -376,26 +377,21 @@ fn traverseLinear(ray: Ray) -> HitRecord {
     return closest;
 }
 
-// ===== CLOSEST HIT (erweitert um optionale BVH) =====
+// ===== CLOSEST HIT  =====
 
 fn findClosestHit(ray: Ray) -> HitRecord {
     var closest: HitRecord;
     closest.hit = false;
     closest.t = 999999.0;
 
-    // ⚡ BVH vs. Linear: Prüfe ob BVH-Daten GÜLTIG sind
-    // WICHTIG: arrayLength() gibt Buffer-Größe zurück, nicht Anzahl gültiger Elemente!
-    // Wir prüfen stattdessen ob der Root-Node valide ist (minBound != 0)
-    let rootMinX = bvhNodes[0];
-    let bvhAvailable = rootMinX != 0.0;
-
-    if (bvhAvailable) {
+    //  BVH vs. Linear: Verwende SceneConfig Flag (zuverlässiger als Buffer-Checks!)
+    if (sceneConfig.bvhEnabled > 0.5) {
         closest = traverseBVH(ray);
     } else {
         closest = traverseLinear(ray);
     }
 
-    // Ground-Plane separat testen (nicht in BVH) - unverändert
+    // Ground-Plane separat testen (nicht in BVH) 
     let tPlane = intersectPlane(ray.origin, ray.direction, sceneConfig.groundY);
     if (tPlane > 0.0 && tPlane < closest.t) {
         closest.hit = true;
@@ -410,7 +406,7 @@ fn findClosestHit(ray: Ray) -> HitRecord {
     return closest;
 }
 
-// ===== SHADOW (erweitert um optionale BVH) =====
+// ===== SHADOW =====
 
 fn calculateShadowFactor(hitPoint: vec3<f32>) -> f32 {
     if (sceneConfig.shadowEnabled < 0.5) {
@@ -420,26 +416,24 @@ fn calculateShadowFactor(hitPoint: vec3<f32>) -> f32 {
     let lightDir = normalize(sceneConfig.lightPos - hitPoint);
     let lightDist = length(sceneConfig.lightPos - hitPoint);
     let shadowRayOrigin = hitPoint + lightDir * EPSILON;
-    
-    // Prüfe ob BVH verfügbar ist
-    let bvhAvailable = arrayLength(&bvhNodes) > 0u;
-    
-    if (bvhAvailable) {
+
+    // Prüfe ob BVH aktiviert ist (via SceneConfig Flag)
+    if (sceneConfig.bvhEnabled > 0.5) {
         // Shadow-Ray mit BVH testen
         let shadowRay = Ray(shadowRayOrigin, lightDir);
         let shadowHit = traverseBVH(shadowRay);
-        
+
         if (shadowHit.hit && shadowHit.t < lightDist) {
             return 0.3; // Schatten
         }
     } else {
-        // Fallback: Lineare Schatten-Tests (Ihr alter Code)
+        // Fallback: Lineare Schatten-Tests (ohne BVH)
         let actualSphereCount = min(renderInfo.sphereCount, MAX_SPHERES);
-        
+
         for (var i = 0u; i < actualSphereCount; i++) {
             let t = intersectSphere(shadowRayOrigin, lightDir, i);
             if (t > 0.0 && t < lightDist) {
-                return 0.3;
+                return 0.3; // Schatten gefunden
             }
         }
     }
@@ -447,31 +441,32 @@ fn calculateShadowFactor(hitPoint: vec3<f32>) -> f32 {
     return 1.0; // Licht
 }
 
-// ===== LIGHTING (unverändert aus Ihrem alten Code) =====
+// ===== LIGHTING =====
 
 fn calculateLightingWithShadow(hitPoint: vec3<f32>, normal: vec3<f32>, color: vec3<f32>, shadowFactor: f32) -> vec3<f32> {
     let lightDir = normalize(sceneConfig.lightPos - hitPoint);
     let diffuse = max(dot(normal, lightDir), 0.0);
+
     let ambient = sceneConfig.ambientStrength;
     
     let lighting = ambient + diffuse * shadowFactor * 0.8;
     return color * lighting;
 }
 
-// ===== BACKGROUND (unverändert aus Ihrem alten Code) =====
+// ===== BACKGROUND =====
 
 fn getBackgroundColor(direction: vec3<f32>) -> vec3<f32> {
     let t = 0.5 * (direction.y + 1.0);
     return mix(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.5, 0.7, 1.0), t);
 }
 
-// ===== GAMMA CORRECTION (unverändert aus Ihrem alten Code) =====
+// ===== GAMMA CORRECTION =====
 
 fn linearToSrgb(linear: vec3<f32>) -> vec3<f32> {
     return pow(linear, vec3<f32>(1.0 / 2.2));
 }
 
-// ===== MAIN COMPUTE SHADER (unverändert aus Ihrem alten Code) =====
+// ===== MAIN COMPUTE SHADER =====
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
@@ -501,32 +496,20 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         } else if (cached.sphereIndex == CACHE_GROUND) {
             let normal = vec3<f32>(0.0, 1.0, 0.0);
             let groundColor = vec3<f32>(0.6, 0.6, 0.6);
-            
-            var shadowFactor: f32;
-            if (isShadowCacheValid(cached)) {
-                shadowFactor = cached.shadowFactor;
-            } else {
-                shadowFactor = calculateShadowFactor(cached.hitPoint);
-                let baseIndex = getCacheBaseIndex(pixelCoords);
-                geometryCache[baseIndex + CACHE_SHADOW_FACTOR] = shadowFactor;
-            }
-            
+
+            // WICHTIG: Schatten IMMER neu berechnen (nicht cachen!)
+            let shadowFactor = calculateShadowFactor(cached.hitPoint);
+
             finalColor = calculateLightingWithShadow(cached.hitPoint, normal, groundColor, shadowFactor);
             
         } else {
             let sphereIndex = u32(cached.sphereIndex);
             let sphere = spheres[sphereIndex];
             let normal = normalize(cached.hitPoint - sphere.center);
-            
-            var shadowFactor: f32;
-            if (isShadowCacheValid(cached)) {
-                shadowFactor = cached.shadowFactor;
-            } else {
-                shadowFactor = calculateShadowFactor(cached.hitPoint);
-                let baseIndex = getCacheBaseIndex(pixelCoords);
-                geometryCache[baseIndex + CACHE_SHADOW_FACTOR] = shadowFactor;
-            }
-            
+
+            // WICHTIG: Schatten IMMER neu berechnen (nicht cachen!)
+            let shadowFactor = calculateShadowFactor(cached.hitPoint);
+
             finalColor = calculateLightingWithShadow(cached.hitPoint, normal, sphere.color, shadowFactor);
         }
         
@@ -583,11 +566,12 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         let centerHit = findClosestHit(centerRay);
         
         if (centerHit.hit) {
-            let shadowFactor = calculateShadowFactor(centerHit.point);
+            // Schatten wird NICHT gecacht, daher Dummy-Wert (wird nie verwendet)
+            let dummyShadow = 1.0;
             if (centerHit.material == GROUND_MATERIAL_ID) {
-                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point, shadowFactor);
+                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point, dummyShadow);
             } else {
-                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point, shadowFactor);
+                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point, dummyShadow);
             }
         } else {
             setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0), 1.0);

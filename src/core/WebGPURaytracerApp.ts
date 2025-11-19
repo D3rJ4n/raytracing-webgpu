@@ -143,10 +143,8 @@ export class WebGPURaytracerApp {
         }
 
         // Update spheres buffer with current Three.js positions
-        this.bufferManager.updateSpheresFromScene(this.scene);
-
-        // Selektive Cache-Invalidierung für bewegte Objekte
-        await this.bufferManager.invalidateForSceneChanges(this.scene);
+        // Jetzt mit automatischer Cache-Invalidation!
+        await this.bufferManager.updateSpheresFromScene(this.scene);
 
         const startTime = performance.now();
         await this.renderer.renderFrame(this.canvas);

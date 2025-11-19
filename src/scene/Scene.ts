@@ -102,7 +102,7 @@ export class Scene {
         this.logger.init('Erstelle massive BVH-Test-Szene...');
 
         const SPHERE_COUNT = 400;
-        const WORLD_SIZE = 80; // ⚡ Größere Welt für besseren BVH-Speedup (Spheres verteilt)
+        const WORLD_SIZE = 50;
         let validSpheres = 0;
         let invalidSpheres = 0;
 
@@ -264,6 +264,20 @@ export class Scene {
             }
         });
 
+        this.isAnimationActive = false;
+        this.animatedSpheres.clear();
+        this.animationTime = 0;
+    }
+
+    /**
+     * Setzt ALLE Spheres auf ihre Originalposition zurück (für Tests)
+     */
+    public resetAllSpheresToOriginalPositions(): void {
+        this.meshes.forEach(sphere => {
+            if (sphere.userData.originalPosition) {
+                sphere.position.copy(sphere.userData.originalPosition);
+            }
+        });
         this.isAnimationActive = false;
         this.animatedSpheres.clear();
         this.animationTime = 0;

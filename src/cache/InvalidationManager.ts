@@ -24,6 +24,10 @@ export class GeometryInvalidationManager {
     private screenProjection: GeometryScreenProjection;
     private stats: GeometryInvalidationStats;
 
+    // Szenen-Daten für Shadow Bounds Berechnung
+    private lightPosition: { x: number; y: number; z: number } = { x: 0, y: 10, z: 0 };
+    private groundY: number = -1.0;
+
     // DEBUG: Aktiviere detailliertes Logging
     private debugMode: boolean = true;
 
@@ -44,6 +48,20 @@ export class GeometryInvalidationManager {
         this.stats = new GeometryInvalidationStats();
 
         this.logger.cache('InvalidationManager mit selektiver Invalidierung initialisiert');
+    }
+
+    /**
+     * Setze Lichtposition für Shadow Bounds Berechnung
+     */
+    public setLightPosition(position: { x: number; y: number; z: number }): void {
+        this.lightPosition = position;
+    }
+
+    /**
+     * Setze Ground Y Position für Shadow Bounds Berechnung
+     */
+    public setGroundY(y: number): void {
+        this.groundY = y;
     }
 
     /**
@@ -124,7 +142,7 @@ export class GeometryInvalidationManager {
     }
 
     /**
-     * Objekt-Bewegungen - Selektive Cache-Invalidierung
+     * Objekt-Bewegungen - Selektive Cache-Invalidierung MIT SCHATTEN
      */
     private async handleObjectMovements(
         movedSpheres: number[],
@@ -135,7 +153,7 @@ export class GeometryInvalidationManager {
         let regionsCount = 0;
 
         if (this.debugMode) {
-            this.logger.cache(`Verarbeite ${movedSpheres.length} bewegte Spheres...`);
+            this.logger.cache(`Verarbeite ${movedSpheres.length} bewegte Spheres (inkl. Schatten)...`);
         }
 
         for (const sphereIndex of movedSpheres) {
@@ -143,19 +161,40 @@ export class GeometryInvalidationManager {
             const oldPosition = this.movementTracker.getLastPosition(sphereIndex);
 
             if (oldPosition && sphereData) {
-                // Screen bounds für alte und neue Position berechnen
-                const oldBounds = this.screenProjection.sphereToScreenBounds(
+                // 1. KUGEL-BOUNDS (alte + neue Position)
+                const oldSphereBounds = this.screenProjection.sphereToScreenBounds(
                     oldPosition,
                     sphereData.radius
                 );
-                const newBounds = this.screenProjection.sphereToScreenBounds(
+                const newSphereBounds = this.screenProjection.sphereToScreenBounds(
                     sphereData.position,
                     sphereData.radius
                 );
 
-                // Vereinigte Bounds + Sicherheitspuffer
-                const combinedBounds = this.combineBounds(oldBounds, newBounds);
-                const expandedBounds = this.expandBounds(combinedBounds, 10);
+                // 2. SCHATTEN-BOUNDS (DEAKTIVIERT wegen Performance-Problem)
+                // TODO: writeBuffer-Schleife muss optimiert werden, bevor Shadow Bounds aktiviert werden können
+                // const oldShadowBounds = this.screenProjection.calculateShadowBounds(
+                //     oldPosition,
+                //     sphereData.radius,
+                //     this.lightPosition,
+                //     this.groundY
+                // );
+                // const newShadowBounds = this.screenProjection.calculateShadowBounds(
+                //     sphereData.position,
+                //     sphereData.radius,
+                //     this.lightPosition,
+                //     this.groundY
+                // );
+
+                // 3. NUR KUGEL-BEREICHE vereinigen (Shadow Bounds deaktiviert für Performance)
+                const allBounds = [
+                    oldSphereBounds,
+                    newSphereBounds
+                    // oldShadowBounds,  // Deaktiviert
+                    // newShadowBounds   // Deaktiviert
+                ];
+                const combinedBounds = this.screenProjection.unionMultipleBounds(allBounds);
+                const expandedBounds = this.screenProjection.expandBounds(combinedBounds, 10);
 
                 // Prüfe ob Bounds gültig sind
                 if (this.screenProjection.isValidBounds(expandedBounds)) {
@@ -175,7 +214,7 @@ export class GeometryInvalidationManager {
         const invalidationPercentage = (totalPixelsInvalidated / (this.canvasWidth * this.canvasHeight)) * 100;
 
         this.logger.cache(
-            `SELEKTIVE INVALIDIERUNG: ${movedSpheres.length} Spheres, ` +
+            `✅ SELEKTIVE INVALIDIERUNG: ${movedSpheres.length} Spheres, ` +
             `${totalPixelsInvalidated.toLocaleString()} pixels (${invalidationPercentage.toFixed(2)}%)`
         );
 

@@ -154,12 +154,24 @@ export class BufferManager {
                 this.canvasWidth,
                 this.canvasHeight
             );
+
+            // Setze initiale Lichtposition und GroundY (wird später via Scene aktualisiert)
+            this.cacheInvalidationManager.setLightPosition({ x: 0, y: 10, z: 0 });
+            this.cacheInvalidationManager.setGroundY(-1.0);
         } catch (error) {
             this.logger.error('Cache-Invalidierung-Manager konnte nicht initialisiert werden:', error);
         }
     }
 
-    public async invalidateForSceneChanges(scene: Scene): Promise<void> {
+    /**
+     * Invalidiert Cache basierend auf Scene-Änderungen
+     * @param scene Die Scene
+     * @param changeInfo Optional: Info über spezifische Änderung für selektive Invalidation
+     */
+    public async invalidateForSceneChanges(
+        scene: Scene,
+        changeInfo?: { type: 'color' | 'geometry' | 'structural', sphereIndex?: number }
+    ): Promise<void> {
         if (!this.cacheInvalidationManager) {
             await this.legacyRandomInvalidation();
             return;
@@ -168,8 +180,30 @@ export class BufferManager {
         const spheresData = scene.getSpheresData();
         const cameraData = scene.getCameraData();
 
+        // Update Lichtposition und GroundY für Shadow Bounds Berechnung
+        const lightPos = scene.getPrimaryLightPosition();
+        const groundY = scene.getGroundY();
+        this.cacheInvalidationManager.setLightPosition(lightPos);
+        this.cacheInvalidationManager.setGroundY(groundY);
+
         try {
-            const result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
+            // Entscheide zwischen vollständiger und selektiver Invalidation
+            let result;
+
+            if (changeInfo?.type === 'structural' || !changeInfo) {
+                // Strukturelle Änderung oder keine Info → Komplette Invalidation
+                result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
+                console.log(`🔄 Cache: Komplette Invalidation (${result.pixelsInvalidated} pixels)`);
+            } else if (changeInfo.sphereIndex !== undefined) {
+                // Einzelne Sphere geändert → Selektive Invalidation
+                // TODO: Implementiere invalidateSphere in CacheInvalidationManager
+                // Für jetzt: Benutze vollständige Invalidation
+                result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
+                console.log(`🎯 Cache: Selektive Invalidation für Sphere ${changeInfo.sphereIndex} (${result.pixelsInvalidated} pixels)`);
+            } else {
+                // Fallback
+                result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
+            }
 
             this.legacyInvalidationStats.totalInvalidations++;
             this.legacyInvalidationStats.pixelsInvalidated += result.pixelsInvalidated;
@@ -297,7 +331,7 @@ export class BufferManager {
 
         this.sceneConfigBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.SCENE_CONFIG.LABEL,
-            size: 48, // Match original size
+            size: 64, // Must be multiple of 16 for uniform buffers (was 48, now 64 for bvhEnabled + padding)
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
@@ -305,11 +339,12 @@ export class BufferManager {
         const ambient = ambientIntensity !== undefined ? ambientIntensity : 0.2;
         const ground = groundY !== undefined ? groundY : -1.0;
 
-        // Match the original structure exactly
+        // Updated structure with bvhEnabled flag
         const sceneConfigData = new Float32Array([
             ground, 0, 0, 0,           // Ground Y position (from Three.js), padding
             light.x, light.y, light.z, 1.0,  // Light position, shadow enabled
-            1.0, 8, 0.01, ambient     // Reflections enabled, max bounces, min contribution, ambient
+            1.0, 8, 0.01, ambient,     // Reflections enabled, max bounces, min contribution, ambient
+            this.bvhEnabled ? 1.0 : 0.0  // BVH enabled flag
         ]);
 
         this.device.queue.writeBuffer(this.sceneConfigBuffer, 0, sceneConfigData);
@@ -332,10 +367,31 @@ export class BufferManager {
         this.device.queue.writeBuffer(this.cameraBuffer, 0, extendedData);
     }
 
+    /**
+     * Aktualisiert nur den bvhEnabled-Flag im SceneConfig-Buffer (Offset 48)
+     */
+    private updateBVHFlagInSceneConfig(): void {
+        if (!this.device || !this.sceneConfigBuffer) {
+            return; // Noch nicht initialisiert, wird beim nächsten Init gesetzt
+        }
+
+        // bvhEnabled ist das 13. float im Buffer (Index 12, Offset 48 Bytes)
+        const bvhFlagData = new Float32Array([this.bvhEnabled ? 1.0 : 0.0]);
+        this.device.queue.writeBuffer(this.sceneConfigBuffer, 48, bvhFlagData);
+    }
+
     private lastSphereHash: string = '';
     private lastSphereCount: number = 0; // ⚡ Track sphere count for BVH rebuild
 
-    public updateSpheresFromScene(scene: Scene, forceRebuild: boolean = false): void {
+    /**
+     * Update Spheres mit intelligentem BVH-Handling und selektiver Cache-Invalidation
+     * @param scene Die Scene mit den Sphere-Daten
+     * @param changeInfo Optional: Welche Art von Änderung (für Optimierung)
+     */
+    public async updateSpheresFromScene(
+        scene: Scene,
+        changeInfo?: { type: 'color' | 'geometry' | 'structural', sphereIndex?: number }
+    ): Promise<void> {
         // ===== NULL-CHECKS =====
         if (!this.device) {
             throw new Error('BufferManager nicht initialisiert - device ist null');
@@ -349,27 +405,35 @@ export class BufferManager {
 
         // Prüfe ob sich Spheres tatsächlich geändert haben
         const currentHash = this.hashSphereData(spheresData);
-        const spheresChanged = currentHash !== this.lastSphereHash || forceRebuild;
+        const spheresChanged = currentHash !== this.lastSphereHash || changeInfo !== undefined;
         const sphereCountChanged = sphereCount !== this.lastSphereCount;
 
-        if (spheresChanged) {
-            const oldHash = this.lastSphereHash; // 🔧 FIX: Hash VOR dem Update speichern
-            this.lastSphereHash = currentHash;
-            this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
-            // this.logger.buffer(`✅ Spheres aktualisiert (Hash: ${currentHash.slice(0, 8)}...)${forceRebuild ? ' [FORCE]' : ''}`);
+        // Auto-detect structural change
+        let changeType = changeInfo?.type || (sphereCountChanged ? 'structural' : 'geometry');
+        const finalChangeInfo = changeInfo || { type: changeType, sphereIndex: undefined };
 
-            // ⚡ BVH NUR bei STRUKTURELLEN Änderungen neu bauen (Sphere-Anzahl geändert)
-            // NICHT bei reinen Positions-Änderungen (zu teuer!)
-            if (this.bvhEnabled && (sphereCountChanged || forceRebuild)) {
-                console.log(`🔧 BVH Rebuild: Sphere count changed ${this.lastSphereCount} → ${sphereCount}`);
+        if (spheresChanged) {
+            this.lastSphereHash = currentHash;
+            this.lastSphereCount = sphereCount;
+
+            // WICHTIG: Gecachte Daten aktualisieren BEVOR wir GPU schreiben!
+            this.spheresData = spheresData;
+
+            // GPU Buffer aktualisieren
+            this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
+
+            // BVH Rebuild Entscheidung
+            const needsBVHRebuild = this.bvhEnabled && (
+                changeType === 'geometry' ||
+                changeType === 'structural'
+            );
+
+            if (needsBVHRebuild) {
                 this.buildBVH(spheresData, sphereCount);
-                this.lastSphereCount = sphereCount;
-            } else if (spheresChanged && !sphereCountChanged) {
-                // Nur Positionen geändert → BVH NICHT neu bauen, nur Sphere-Buffer aktualisieren
-                // console.log(`⚡ Sphere positions changed, BVH reused (count: ${sphereCount})`);
             }
-        } else {
-            // this.logger.buffer('⚡ Spheres unverändert - kein Update/BVH-Rebuild (Cache optimiert!)');
+
+            // Cache invalidieren (mit changeInfo für Optimierung)
+            await this.invalidateForSceneChanges(scene, finalChangeInfo);
         }
     }
 
@@ -379,6 +443,9 @@ export class BufferManager {
     public setBVHEnabled(enabled: boolean): void {
         const wasEnabled = this.bvhEnabled;
         this.bvhEnabled = enabled;
+
+        // WICHTIG: SceneConfig-Buffer aktualisieren mit neuem BVH-Status!
+        this.updateBVHFlagInSceneConfig();
 
         if (enabled && !wasEnabled && this.spheresData) {
             // BVH aktivieren
@@ -473,23 +540,14 @@ export class BufferManager {
             sceneConfig: this.sceneConfigBuffer,
         };
 
-        // BVH-Buffers hinzufügen falls aktiviert
-        if (this.bvhEnabled && this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
+        // BVH-Buffers IMMER hinzufügen (auch wenn disabled)
+        // Shader braucht sie gebunden um zwischen BVH und linearem Search zu entscheiden!
+        if (this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
             buffers.bvhNodes = this.bvhNodesBuffer;
             buffers.bvhSphereIndices = this.bvhSphereIndicesBuffer;
-        }
-        // 🔧 DEBUG: Buffer-Bindings prüfen  
-        console.log(`🔍 Buffer Bindings Debug:`);
-        console.log(`├─ BVH enabled: ${this.bvhEnabled}`);
-        console.log(`├─ bvhNodesBuffer exists: ${!!this.bvhNodesBuffer}`);
-        console.log(`├─ bvhSphereIndicesBuffer exists: ${!!this.bvhSphereIndicesBuffer}`);
-
-        if (this.bvhEnabled && this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
-            buffers.bvhNodes = this.bvhNodesBuffer;
-            buffers.bvhSphereIndices = this.bvhSphereIndicesBuffer;
-            console.log(`✅ BVH-Buffers zu Bind Group hinzugefügt`);
+            console.log(`✅ BVH-Buffers gebunden (enabled: ${this.bvhEnabled})`);
         } else {
-            console.log(`❌ BVH-Buffers NICHT hinzugefügt!`);
+            console.log(`❌ BVH-Buffers nicht verfügbar - Schatten funktionieren möglicherweise nicht!`);
         }
 
         return buffers;
