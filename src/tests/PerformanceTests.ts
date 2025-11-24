@@ -478,6 +478,256 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         console.log('╚═══════════════════════════════════════╝\n');
     };
 
+    // ===== BVH SKALIERUNGS-TEST: MIT BVH =====
+    (window as any).testBVHScaling = async () => {
+        console.log('\n╔════════════════════════════════════════════════════════════════════╗');
+        console.log('║  BVH SKALIERUNGS-TEST (MIT BVH)                                    ║');
+        console.log('║  Start: 200 Kugeln, +20 pro Durchgang, 20 Durchgänge             ║');
+        console.log('║  Je 50 Render-Durchläufe pro Kugel-Anzahl                        ║');
+        console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+
+        const startSpheres = 200;
+        const sphereIncrement = 20;
+        const iterations = 20;
+        const framesPerIteration = 50;
+
+        const results: Array<{
+            sphereCount: number;
+            avgTime: number;
+            minTime: number;
+            maxTime: number;
+            fps: number;
+        }> = [];
+
+        // BVH aktivieren
+        app.bufferManager.setBVHEnabled(true);
+        console.log('✅ BVH aktiviert\n');
+
+        for (let iter = 0; iter < iterations; iter++) {
+            const sphereCount = startSpheres + (iter * sphereIncrement);
+            console.log(`\n🔧 Iteration ${iter + 1}/${iterations}: ${sphereCount} Kugeln`);
+
+            // Szene mit neuer Kugel-Anzahl erstellen
+            app.scene.createDynamicSphereScene(sphereCount);
+            app.resetCache();
+
+            // Warmup: 3 Frames
+            for (let i = 0; i < 3; i++) {
+                await app.renderFrame();
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            // 50 Render-Durchläufe
+            const frameTimes: number[] = [];
+            for (let frame = 0; frame < framesPerIteration; frame++) {
+                app.resetCache(); // Jeder Frame ohne Cache (reines BVH-Testing)
+                const start = performance.now();
+                await app.renderFrame();
+                const frameTime = performance.now() - start;
+                frameTimes.push(frameTime);
+
+                if (frame % 10 === 0) {
+                    console.log(`  Frame ${frame + 1}/${framesPerIteration}: ${frameTime.toFixed(2)}ms`);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            // Statistiken berechnen
+            const avgTime = frameTimes.reduce((a, b) => a + b) / frameTimes.length;
+            const minTime = Math.min(...frameTimes);
+            const maxTime = Math.max(...frameTimes);
+            const fps = 1000 / avgTime;
+
+            results.push({
+                sphereCount,
+                avgTime,
+                minTime,
+                maxTime,
+                fps
+            });
+
+            console.log(`  ✅ Durchschnitt: ${avgTime.toFixed(2)}ms (${fps.toFixed(1)} FPS)`);
+            console.log(`     Min: ${minTime.toFixed(2)}ms, Max: ${maxTime.toFixed(2)}ms`);
+
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // Zusammenfassung
+        console.log('\n╔════════════════════════════════════════════════════════════════════════╗');
+        console.log('║                   BVH SKALIERUNGS-ZUSAMMENFASSUNG                      ║');
+        console.log('╠════════════════════════════════════════════════════════════════════════╣');
+        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time  │ Speedup ║');
+        console.log('║──────────┼────────────┼───────────┼────────────┼────────────┼─────────║');
+
+        const baseline = results[0].avgTime;
+        results.forEach((result, idx) => {
+            const speedup = baseline / result.avgTime;
+            const spheres = result.sphereCount.toString().padStart(6);
+            const avg = result.avgTime.toFixed(2).padStart(8);
+            const fps = result.fps.toFixed(1).padStart(7);
+            const min = result.minTime.toFixed(2).padStart(8);
+            const max = result.maxTime.toFixed(2).padStart(8);
+            const speedupStr = speedup.toFixed(2).padStart(6);
+
+            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms  │  ${speedupStr}x ║`);
+        });
+
+        console.log('╚════════════════════════════════════════════════════════════════════════╝\n');
+
+        // Komplexitäts-Analyse
+        const firstResult = results[0];
+        const lastResult = results[results.length - 1];
+        const sphereRatio = lastResult.sphereCount / firstResult.sphereCount;
+        const timeRatio = lastResult.avgTime / firstResult.avgTime;
+        const logRatio = Math.log(lastResult.sphereCount) / Math.log(firstResult.sphereCount);
+
+        console.log('📊 KOMPLEXITÄTS-ANALYSE:');
+        console.log('────────────────────────────────────────────────────────────────────────');
+        console.log(`Kugeln: ${firstResult.sphereCount} → ${lastResult.sphereCount} (${sphereRatio.toFixed(2)}x mehr)`);
+        console.log(`Zeit: ${firstResult.avgTime.toFixed(2)}ms → ${lastResult.avgTime.toFixed(2)}ms (${timeRatio.toFixed(2)}x länger)`);
+        console.log(`Erwarteter O(log n) Faktor: ${logRatio.toFixed(2)}x`);
+        console.log(`Tatsächlicher Faktor: ${timeRatio.toFixed(2)}x`);
+
+        if (timeRatio < logRatio * 1.2) {
+            console.log('\n🚀 EXZELLENT: Logarithmische Komplexität bestätigt! (BVH funktioniert perfekt)');
+        } else if (timeRatio < sphereRatio * 0.5) {
+            console.log('\n✅ GUT: Sub-lineare Komplexität (besser als O(n))');
+        } else if (timeRatio < sphereRatio) {
+            console.log('\n⚠️ WARNUNG: Annähernd linear (BVH-Vorteil nicht optimal)');
+        } else {
+            console.log('\n❌ PROBLEM: Schlechter als linear (BVH möglicherweise defekt)');
+        }
+
+        console.log('────────────────────────────────────────────────────────────────────────\n');
+
+        return results;
+    };
+
+    // ===== LINEARER SKALIERUNGS-TEST: OHNE BVH =====
+    (window as any).testLinearScaling = async () => {
+        console.log('\n╔════════════════════════════════════════════════════════════════════╗');
+        console.log('║  LINEARER SKALIERUNGS-TEST (OHNE BVH)                              ║');
+        console.log('║  Start: 50 Kugeln, +20 pro Durchgang, 20 Durchgänge              ║');
+        console.log('║  Je 50 Render-Durchläufe pro Kugel-Anzahl                        ║');
+        console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+
+        const startSpheres = 50;
+        const sphereIncrement = 20;
+        const iterations = 20;
+        const framesPerIteration = 50;
+
+        const results: Array<{
+            sphereCount: number;
+            avgTime: number;
+            minTime: number;
+            maxTime: number;
+            fps: number;
+        }> = [];
+
+        // BVH deaktivieren
+        app.bufferManager.setBVHEnabled(false);
+        console.log('✅ BVH deaktiviert (lineares Rendering)\n');
+
+        for (let iter = 0; iter < iterations; iter++) {
+            const sphereCount = startSpheres + (iter * sphereIncrement);
+            console.log(`\n🔧 Iteration ${iter + 1}/${iterations}: ${sphereCount} Kugeln`);
+
+            // Szene mit neuer Kugel-Anzahl erstellen
+            app.scene.createDynamicSphereScene(sphereCount);
+            app.resetCache();
+
+            // Warmup: 3 Frames
+            for (let i = 0; i < 3; i++) {
+                await app.renderFrame();
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            // 50 Render-Durchläufe
+            const frameTimes: number[] = [];
+            for (let frame = 0; frame < framesPerIteration; frame++) {
+                app.resetCache(); // Jeder Frame ohne Cache (reines lineares Testing)
+                const start = performance.now();
+                await app.renderFrame();
+                const frameTime = performance.now() - start;
+                frameTimes.push(frameTime);
+
+                if (frame % 10 === 0) {
+                    console.log(`  Frame ${frame + 1}/${framesPerIteration}: ${frameTime.toFixed(2)}ms`);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            // Statistiken berechnen
+            const avgTime = frameTimes.reduce((a, b) => a + b) / frameTimes.length;
+            const minTime = Math.min(...frameTimes);
+            const maxTime = Math.max(...frameTimes);
+            const fps = 1000 / avgTime;
+
+            results.push({
+                sphereCount,
+                avgTime,
+                minTime,
+                maxTime,
+                fps
+            });
+
+            console.log(`  ✅ Durchschnitt: ${avgTime.toFixed(2)}ms (${fps.toFixed(1)} FPS)`);
+            console.log(`     Min: ${minTime.toFixed(2)}ms, Max: ${maxTime.toFixed(2)}ms`);
+
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // Zusammenfassung
+        console.log('\n╔════════════════════════════════════════════════════════════════════════╗');
+        console.log('║                  LINEARER SKALIERUNGS-ZUSAMMENFASSUNG                  ║');
+        console.log('╠════════════════════════════════════════════════════════════════════════╣');
+        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time  │ Speedup ║');
+        console.log('║──────────┼────────────┼───────────┼────────────┼────────────┼─────────║');
+
+        const baseline = results[0].avgTime;
+        results.forEach((result, idx) => {
+            const speedup = baseline / result.avgTime;
+            const spheres = result.sphereCount.toString().padStart(6);
+            const avg = result.avgTime.toFixed(2).padStart(8);
+            const fps = result.fps.toFixed(1).padStart(7);
+            const min = result.minTime.toFixed(2).padStart(8);
+            const max = result.maxTime.toFixed(2).padStart(8);
+            const speedupStr = speedup.toFixed(2).padStart(6);
+
+            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms  │  ${speedupStr}x ║`);
+        });
+
+        console.log('╚════════════════════════════════════════════════════════════════════════╝\n');
+
+        // Linearitäts-Analyse
+        const firstResult = results[0];
+        const lastResult = results[results.length - 1];
+        const sphereRatio = lastResult.sphereCount / firstResult.sphereCount;
+        const timeRatio = lastResult.avgTime / firstResult.avgTime;
+
+        console.log('📊 LINEARITÄTS-ANALYSE:');
+        console.log('────────────────────────────────────────────────────────────────────────');
+        console.log(`Kugeln: ${firstResult.sphereCount} → ${lastResult.sphereCount} (${sphereRatio.toFixed(2)}x mehr)`);
+        console.log(`Zeit: ${firstResult.avgTime.toFixed(2)}ms → ${lastResult.avgTime.toFixed(2)}ms (${timeRatio.toFixed(2)}x länger)`);
+        console.log(`Erwarteter linearer Faktor: ${sphereRatio.toFixed(2)}x`);
+        console.log(`Tatsächlicher Faktor: ${timeRatio.toFixed(2)}x`);
+        console.log(`Abweichung: ${((timeRatio / sphereRatio - 1) * 100).toFixed(1)}%`);
+
+        if (Math.abs(timeRatio / sphereRatio - 1) < 0.15) {
+            console.log('\n✅ PERFEKT: Lineare Komplexität O(n) bestätigt!');
+        } else if (timeRatio < sphereRatio) {
+            console.log('\n🚀 ÜBERRASCHUNG: Besser als linear (möglicherweise GPU-Caching)');
+        } else {
+            console.log('\n⚠️ HINWEIS: Schlechter als linear (möglicherweise Overhead oder Cache-Effekte)');
+        }
+
+        console.log('────────────────────────────────────────────────────────────────────────\n');
+
+        return results;
+    };
+
     // ===== UMFASSENDE TEST-SUITE: STATISCH, MOVED, ANIMIERT =====
     (window as any).testComprehensive = async () => {
         console.log('\n╔════════════════════════════════════════════════════════════════════╗');

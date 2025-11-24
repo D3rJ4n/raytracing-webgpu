@@ -379,6 +379,43 @@ export class Scene {
 
     // ===== UTILITY METHODEN =====
 
+    /**
+     * Erstelle dynamische Szene mit variabler Anzahl von Kugeln
+     * (für Performance-Tests)
+     */
+    public createDynamicSphereScene(sphereCount: number): void {
+        this.clearSpheres();
+
+        const WORLD_SIZE = 50;
+
+        for (let i = 0; i < sphereCount; i++) {
+            const x = (Math.random() - 0.5) * WORLD_SIZE;
+            const y = Math.random() * 20 + 2; // 2 bis 22
+            const z = (Math.random() - 0.5) * WORLD_SIZE;
+
+            const radius = 0.3 + Math.random() * 0.4;
+            const hue = i / sphereCount;
+
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 12, 12),
+                new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(hue, 0.8, 0.6),
+                    metalness: Math.random() > 0.8 ? 0.9 : 0.1,
+                    roughness: 0.3 + Math.random() * 0.4
+                })
+            );
+
+            sphere.position.set(x, y, z);
+            sphere.name = `DynamicSphere_${i}`;
+            sphere.userData.originalPosition = { x, y, z };
+
+            this.scene.add(sphere);
+            this.meshes.push(sphere);
+        }
+
+        this.logger.success(`${sphereCount} Kugeln für Performance-Test erstellt`);
+    }
+
     public clearSpheres(): void {
         this.meshes.forEach(mesh => {
             this.scene.remove(mesh);

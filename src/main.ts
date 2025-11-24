@@ -28,7 +28,10 @@ async function main(): Promise<void> {
         console.log('  • testSelectiveVsFull() - Vergleich selektiv vs. komplett');
         console.log('  • testCameraMovement() - Worst-Case (Kamera-Bewegung)');
         console.log('  • testFullPerformanceMatrix() - ⭐ VOLLSTÄNDIGER TEST (alle BVH+Cache Kombinationen)');
-        console.log('  • runAllTests() - Alle Tests nacheinander ausführen\n');
+        console.log('  • runAllTests() - Alle Tests nacheinander ausführen');
+        console.log('\n🔬 BVH Skalierungs-Tests:');
+        console.log('  • testBVHScaling() - ⭐ BVH-Test (200-580 Kugeln in 20er-Schritten, erwartet O(log n))');
+        console.log('  • testLinearScaling() - ⭐ Linearer Test (50-430 Kugeln in 20er-Schritten, erwartet O(n))\n');
 
     } catch (error) {
         logger.error('Fehler beim Starten:', error);
