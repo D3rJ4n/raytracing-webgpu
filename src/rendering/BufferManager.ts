@@ -408,11 +408,20 @@ export class BufferManager {
         const spheresChanged = currentHash !== this.lastSphereHash || changeInfo !== undefined;
         const sphereCountChanged = sphereCount !== this.lastSphereCount;
 
+        // ⚡ DEBUG
+        console.log(`🔍 updateSpheresFromScene: sphereCount=${sphereCount}, lastCount=${this.lastSphereCount}, changed=${sphereCountChanged}`);
+
         // Auto-detect structural change
         let changeType = changeInfo?.type || (sphereCountChanged ? 'structural' : 'geometry');
         const finalChangeInfo = changeInfo || { type: changeType, sphereIndex: undefined };
 
         if (spheresChanged) {
+            // ⚡ FIX: RenderInfo aktualisieren wenn sich Sphere-Anzahl ändert!
+            // WICHTIG: VOR dem Update von lastSphereCount, damit spheresData korrekt ist
+            if (sphereCountChanged) {
+                console.log(`⚡ CALLING updateRenderInfo() because sphereCount changed: ${this.lastSphereCount} → ${sphereCount}`);
+            }
+
             this.lastSphereHash = currentHash;
             this.lastSphereCount = sphereCount;
 
@@ -421,6 +430,11 @@ export class BufferManager {
 
             // GPU Buffer aktualisieren
             this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
+
+            // RenderInfo NACH dem Update der spheresData
+            if (sphereCountChanged) {
+                this.updateRenderInfo();
+            }
 
             // BVH Rebuild Entscheidung
             const needsBVHRebuild = this.bvhEnabled && (
@@ -513,9 +527,14 @@ export class BufferManager {
             throw new Error('Buffer Manager nicht initialisiert');
         }
 
-        const sphereCount = this.spheresData ? Math.floor(this.spheresData.length / 8) : 0;
+        // ⚡ FIX: Verwende lastSphereCount statt spheresData.length!
+        // spheresData hat immer die Größe für maxSpheres (1000), nicht die tatsächliche Anzahl
+        const sphereCount = this.lastSphereCount;
         const renderInfoData = new Uint32Array([this.canvasWidth, this.canvasHeight, sphereCount, Math.floor(frameTime)]);
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
+
+        // ⚡ DEBUG: Log sphere count updates mit allen Details
+        console.log(`📊 RenderInfo GPU Update: width=${this.canvasWidth}, height=${this.canvasHeight}, sphereCount=${sphereCount}, lastSphereCount=${this.lastSphereCount}`);
     }
 
     public getAllBuffers(): {

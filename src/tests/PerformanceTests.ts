@@ -482,14 +482,15 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
     (window as any).testBVHScaling = async () => {
         console.log('\n╔════════════════════════════════════════════════════════════════════╗');
         console.log('║  BVH SKALIERUNGS-TEST (MIT BVH)                                    ║');
-        console.log('║  Start: 200 Kugeln, +20 pro Durchgang, 20 Durchgänge             ║');
-        console.log('║  Je 50 Render-Durchläufe pro Kugel-Anzahl                        ║');
+        console.log('║  Start: 200 Kugeln, +50 pro Durchgang, 10 Durchgänge             ║');
+        console.log('║  Je 100 Render-Durchläufe pro Kugel-Anzahl                       ║');
+        console.log('║  Cache wird vor JEDEM Frame resettet (reines BVH-Testing)        ║');
         console.log('╚════════════════════════════════════════════════════════════════════╝\n');
 
-        const startSpheres = 200;
-        const sphereIncrement = 20;
-        const iterations = 20;
-        const framesPerIteration = 50;
+        const startSpheres = 500;
+        const sphereIncrement = 50;
+        const iterations = 10;
+        const framesPerIteration = 100;
 
         const results: Array<{
             sphereCount: number;
@@ -510,6 +511,11 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
             // Szene mit neuer Kugel-Anzahl erstellen
             app.scene.createDynamicSphereScene(sphereCount);
             app.resetCache();
+
+            // ⚡ DEBUG: Verifiziere dass BVH aktiviert ist und korrekte Sphere-Count
+            const actualSphereCount = app.scene.getSphereCount();
+            const bvhEnabled = app.bufferManager.isBVHEnabled();
+            console.log(`  📊 Verifizierung: ${actualSphereCount} Spheres in Scene, BVH: ${bvhEnabled ? '✅ Aktiviert (korrekt)' : '❌ DEAKTIVIERT (FEHLER!)'}`);
 
             // Warmup: 3 Frames
             for (let i = 0; i < 3; i++) {
@@ -554,26 +560,23 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         }
 
         // Zusammenfassung
-        console.log('\n╔════════════════════════════════════════════════════════════════════════╗');
-        console.log('║                   BVH SKALIERUNGS-ZUSAMMENFASSUNG                      ║');
-        console.log('╠════════════════════════════════════════════════════════════════════════╣');
-        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time  │ Speedup ║');
-        console.log('║──────────┼────────────┼───────────┼────────────┼────────────┼─────────║');
+        console.log('\n╔═════════════════════════════════════════════════════════════════╗');
+        console.log('║                   BVH SKALIERUNGS-ZUSAMMENFASSUNG               ║');
+        console.log('╠═════════════════════════════════════════════════════════════════╣');
+        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time    ║');
+        console.log('║──────────┼────────────┼───────────┼────────────┼──────────────║');
 
-        const baseline = results[0].avgTime;
-        results.forEach((result, idx) => {
-            const speedup = baseline / result.avgTime;
+        results.forEach((result) => {
             const spheres = result.sphereCount.toString().padStart(6);
             const avg = result.avgTime.toFixed(2).padStart(8);
             const fps = result.fps.toFixed(1).padStart(7);
             const min = result.minTime.toFixed(2).padStart(8);
             const max = result.maxTime.toFixed(2).padStart(8);
-            const speedupStr = speedup.toFixed(2).padStart(6);
 
-            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms  │  ${speedupStr}x ║`);
+            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms    ║`);
         });
 
-        console.log('╚════════════════════════════════════════════════════════════════════════╝\n');
+        console.log('╚═════════════════════════════════════════════════════════════════╝\n');
 
         // Komplexitäts-Analyse
         const firstResult = results[0];
@@ -608,14 +611,15 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
     (window as any).testLinearScaling = async () => {
         console.log('\n╔════════════════════════════════════════════════════════════════════╗');
         console.log('║  LINEARER SKALIERUNGS-TEST (OHNE BVH)                              ║');
-        console.log('║  Start: 50 Kugeln, +20 pro Durchgang, 20 Durchgänge              ║');
-        console.log('║  Je 50 Render-Durchläufe pro Kugel-Anzahl                        ║');
+        console.log('║  Start: 200 Kugeln, +50 pro Durchgang, 10 Durchgänge             ║');
+        console.log('║  Je 100 Render-Durchläufe pro Kugel-Anzahl                       ║');
+        console.log('║  Cache wird vor JEDEM Frame resettet (reines lineares Rendering) ║');
         console.log('╚════════════════════════════════════════════════════════════════════╝\n');
 
-        const startSpheres = 50;
-        const sphereIncrement = 20;
-        const iterations = 20;
-        const framesPerIteration = 50;
+        const startSpheres = 500;
+        const sphereIncrement = 50;
+        const iterations = 10;
+        const framesPerIteration = 100;
 
         const results: Array<{
             sphereCount: number;
@@ -636,6 +640,11 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
             // Szene mit neuer Kugel-Anzahl erstellen
             app.scene.createDynamicSphereScene(sphereCount);
             app.resetCache();
+
+            // ⚡ DEBUG: Verifiziere dass BVH deaktiviert ist und korrekte Sphere-Count
+            const actualSphereCount = app.scene.getSphereCount();
+            const bvhEnabled = app.bufferManager.isBVHEnabled();
+            console.log(`  📊 Verifizierung: ${actualSphereCount} Spheres in Scene, BVH: ${bvhEnabled ? '✅ AKTIVIERT (FEHLER!)' : '❌ Deaktiviert (korrekt)'}`);
 
             // Warmup: 3 Frames
             for (let i = 0; i < 3; i++) {
@@ -680,26 +689,23 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         }
 
         // Zusammenfassung
-        console.log('\n╔════════════════════════════════════════════════════════════════════════╗');
-        console.log('║                  LINEARER SKALIERUNGS-ZUSAMMENFASSUNG                  ║');
-        console.log('╠════════════════════════════════════════════════════════════════════════╣');
-        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time  │ Speedup ║');
-        console.log('║──────────┼────────────┼───────────┼────────────┼────────────┼─────────║');
+        console.log('\n╔═════════════════════════════════════════════════════════════════╗');
+        console.log('║                LINEARER SKALIERUNGS-ZUSAMMENFASSUNG             ║');
+        console.log('╠═════════════════════════════════════════════════════════════════╣');
+        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time    ║');
+        console.log('║──────────┼────────────┼───────────┼────────────┼──────────────║');
 
-        const baseline = results[0].avgTime;
-        results.forEach((result, idx) => {
-            const speedup = baseline / result.avgTime;
+        results.forEach((result) => {
             const spheres = result.sphereCount.toString().padStart(6);
             const avg = result.avgTime.toFixed(2).padStart(8);
             const fps = result.fps.toFixed(1).padStart(7);
             const min = result.minTime.toFixed(2).padStart(8);
             const max = result.maxTime.toFixed(2).padStart(8);
-            const speedupStr = speedup.toFixed(2).padStart(6);
 
-            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms  │  ${speedupStr}x ║`);
+            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms    ║`);
         });
 
-        console.log('╚════════════════════════════════════════════════════════════════════════╝\n');
+        console.log('╚═════════════════════════════════════════════════════════════════╝\n');
 
         // Linearitäts-Analyse
         const firstResult = results[0];
