@@ -30,6 +30,10 @@ export class GeometryInvalidationManager {
 
     // DEBUG: Aktiviere detailliertes Logging
     private debugMode: boolean = true;
+    // Instrumentation: count host writeBuffer calls (helps measure improvement)
+    private writeBufferCallCount: number = 0;
+    // Operation mode: 'pixel' writes per-pixel, 'batch' uses row batching
+    private mode: 'pixel' | 'batch' = 'batch';
 
     constructor(
         device: GPUDevice,
@@ -62,6 +66,11 @@ export class GeometryInvalidationManager {
      */
     public setGroundY(y: number): void {
         this.groundY = y;
+    }
+
+    public setMode(mode: 'pixel' | 'batch') {
+        this.mode = mode;
+        this.writeBufferCallCount = 0;
     }
 
     /**
@@ -248,23 +257,35 @@ export class GeometryInvalidationManager {
         let pixelsInvalidated = 0;
         const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL; // 7
         const bytesPerComponent = BUFFER_CONFIG.CACHE.BYTES_PER_COMPONENT; // 4
-        const validFlagOffset = 6; // CACHE_VALID_FLAG ist der 7. Wert (Index 6)
 
-        // Pixel-für-Pixel invalidieren
-        for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
-            for (let x = safeBounds.minX; x <= safeBounds.maxX; x++) {
-                const pixelIndex = y * this.canvasWidth + x;
-                const validFlagByteOffset = pixelIndex * componentsPerPixel * bytesPerComponent + validFlagOffset * bytesPerComponent;
-
-                // Setze CACHE_VALID_FLAG auf 0.0
-                this.device.queue.writeBuffer(
-                    this.cacheBuffer,
-                    validFlagByteOffset,
-                    new Float32Array([0.0])
-                );
-
-                pixelsInvalidated++;
+        // Row-batched invalidation: write contiguous runs per row (or per-pixel mode)
+        if (this.mode === 'pixel') {
+            // Pixel-for-pixel invalidation
+            for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
+                for (let x = safeBounds.minX; x <= safeBounds.maxX; x++) {
+                    const pixelIndex = y * this.canvasWidth + x;
+                    const validFlagByteOffset = pixelIndex * componentsPerPixel * bytesPerComponent + (6 * bytesPerComponent);
+                    this.device.queue.writeBuffer(this.cacheBuffer, validFlagByteOffset, new Float32Array([0.0]));
+                    this.writeBufferCallCount++;
+                    pixelsInvalidated++;
+                }
             }
+            return pixelsInvalidated;
+        }
+
+        // Batch per-row if mode is 'batch'
+        for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
+            const rowWidth = safeBounds.maxX - safeBounds.minX + 1;
+            if (rowWidth <= 0) continue;
+
+            const rowData = new Float32Array(rowWidth * componentsPerPixel).fill(0.0);
+            const firstPixelIndex = y * this.canvasWidth + safeBounds.minX;
+            const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
+
+            this.device.queue.writeBuffer(this.cacheBuffer, byteOffset, rowData);
+            this.writeBufferCallCount++;
+
+            pixelsInvalidated += rowWidth;
         }
 
         return pixelsInvalidated;
@@ -280,6 +301,7 @@ export class GeometryInvalidationManager {
         // Kompletter Cache-Reset
         const cacheData = new Float32Array(totalPixels * componentsPerPixel).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
+        this.writeBufferCallCount++;
 
         this.logger.cache(`Kompletter Cache invalidiert: ${totalPixels.toLocaleString()} Pixel`);
 
@@ -312,33 +334,14 @@ export class GeometryInvalidationManager {
     }
 
     /**
-     * Bounds kombinieren
+     * Instrumentation: get number of host writeBuffer calls executed by this manager
      */
-    private combineBounds(
-        bounds1: { minX: number; minY: number; maxX: number; maxY: number },
-        bounds2: { minX: number; minY: number; maxX: number; maxY: number }
-    ) {
-        return {
-            minX: Math.min(bounds1.minX, bounds2.minX),
-            minY: Math.min(bounds1.minY, bounds2.minY),
-            maxX: Math.max(bounds1.maxX, bounds2.maxX),
-            maxY: Math.max(bounds1.maxY, bounds2.maxY)
-        };
+    public getWriteBufferCallCount(): number {
+        return this.writeBufferCallCount;
     }
 
-    /**
-     * Bounds erweitern (Sicherheitspuffer)
-     */
-    private expandBounds(
-        bounds: { minX: number; minY: number; maxX: number; maxY: number },
-        padding: number
-    ) {
-        return {
-            minX: Math.max(0, bounds.minX - padding),
-            minY: Math.max(0, bounds.minY - padding),
-            maxX: Math.min(this.canvasWidth - 1, bounds.maxX + padding),
-            maxY: Math.min(this.canvasHeight - 1, bounds.maxY + padding)
-        };
+    public resetWriteBufferCallCount(): void {
+        this.writeBufferCallCount = 0;
     }
 
     /**

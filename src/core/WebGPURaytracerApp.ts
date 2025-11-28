@@ -51,6 +51,13 @@ export class WebGPURaytracerApp {
         this.renderPipeline = new RenderPipeline();
         this.renderer = new Renderer();
         this.pixelCache = new GeometryPixelCache();
+        // Default invalidation mode - can be overridden via URL param
+        const params = new URLSearchParams(window.location.search);
+        const invalidateMode = params.get('invalidateMode');
+        if (invalidateMode === 'pixel' || invalidateMode === 'batch') {
+            this.bufferManager.setInvalidationMode(invalidateMode as 'pixel' | 'batch');
+            this.statusDisplay.showInfo(`Invalidation Mode: ${invalidateMode}`);
+        }
     }
 
     public async initialize(): Promise<void> {
@@ -156,6 +163,17 @@ export class WebGPURaytracerApp {
         await this.pixelCache.readStatistics();
         const cacheStats = this.pixelCache.getStatistics();
         this.performanceMonitor.recordCacheStats(cacheStats);
+
+        // Periodically log instrumentation (every 60 frames)
+        if (this.frameCounter % 60 === 0) {
+            try {
+                const writeCalls = this.bufferManager.getInvalidationWriteBufferCount();
+                console.log(`🔧 invalidation writeBuffer calls (last 60 frames): ${writeCalls}`);
+                this.bufferManager.resetInvalidationWriteBufferCount();
+            } catch (e) {
+                // ignore
+            }
+        }
 
         // Removed excessive debug logging
     }

@@ -29,6 +29,8 @@ export class BufferManager {
     private canvasHeight: number = 0;
 
     private cacheInvalidationManager: GeometryInvalidationManager | null = null;
+    private invalidationMode: 'pixel' | 'batch' = 'batch';
+    private invalidationWriteBufferCallCount: number = 0;
 
     private legacyInvalidationStats = {
         totalInvalidations: 0,
@@ -67,6 +69,10 @@ export class BufferManager {
         this.createBVHBuffers(sphereCount);
 
         this.initializeCacheInvalidation();
+        // Apply initial invalidation mode if changed via setInvalidationMode callback
+        if (this.cacheInvalidationManager) {
+            this.cacheInvalidationManager.setMode(this.invalidationMode);
+        }
 
     }
 
@@ -79,6 +85,8 @@ export class BufferManager {
         }
 
         this.logger.buffer('Erstelle BVH-Buffers...');
+        // Use sphereCount for visibility in logs to avoid lint warnings
+        this.logger.buffer(`Requested BVH buffers for sphereCount: ${sphereCount}`);
 
         // BVH Nodes Buffer
         const nodesBufferSize = BUFFER_CONFIG.BVH_NODES.SIZE;
@@ -218,23 +226,94 @@ export class BufferManager {
     private async legacyRandomInvalidation(): Promise<void> {
         const totalPixels = this.canvasWidth * this.canvasHeight;
         const pixelsToInvalidate = Math.floor(totalPixels * 0.05);
+        let pixelsInvalidated = 0;
 
+        // Create set of random pixel indices
         const invalidPixels = new Set<number>();
         while (invalidPixels.size < pixelsToInvalidate) {
             invalidPixels.add(Math.floor(Math.random() * totalPixels));
         }
 
-        invalidPixels.forEach(pixelIndex => {
-            const validFlagOffset = pixelIndex * 7 * 4 + 6 * 4;
-            this.device!.queue.writeBuffer(
-                this.cacheBuffer!,
-                validFlagOffset,
-                new Float32Array([0.0])
-            );
-        });
+        // Group by row to batch writes
+        const rows = new Map<number, number[]>();
+        for (const pixelIndex of invalidPixels) {
+            const y = Math.floor(pixelIndex / this.canvasWidth);
+            const x = pixelIndex % this.canvasWidth;
+            if (!rows.has(y)) rows.set(y, []);
+            rows.get(y)!.push(x);
+        }
+
+        const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL;
+        const bytesPerComponent = BUFFER_CONFIG.CACHE.BYTES_PER_COMPONENT;
+
+        if (this.invalidationMode === 'pixel') {
+            // fallback: per pixel writes
+            for (const [y, xs] of rows.entries()) {
+                for (const x of xs) {
+                    const pixelIndex = y * this.canvasWidth + x;
+                    const validFlagOffset = pixelIndex * 7 * 4 + 6 * 4;
+                    this.device!.queue.writeBuffer(this.cacheBuffer!, validFlagOffset, new Float32Array([0.0]));
+                    this.invalidationWriteBufferCallCount++;
+                    pixelsInvalidated++;
+                }
+            }
+            this.legacyInvalidationStats.totalInvalidations++;
+            this.legacyInvalidationStats.pixelsInvalidated += pixelsInvalidated;
+            return;
+        }
+
+        // Write batched rows using contiguous runs per row
+        for (const [y, xs] of rows.entries()) {
+            xs.sort((a, b) => a - b);
+            let start = xs[0];
+            let end = xs[0];
+            for (let i = 1; i < xs.length; i++) {
+                const x = xs[i];
+                if (x === end + 1) {
+                    end = x;
+                } else {
+                    const rowWidth = end - start + 1;
+                    const rowData = new Float32Array(rowWidth * componentsPerPixel).fill(0.0);
+                    const firstPixelIndex = y * this.canvasWidth + start;
+                    const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
+                    this.device!.queue.writeBuffer(this.cacheBuffer!, byteOffset, rowData);
+                    this.invalidationWriteBufferCallCount++;
+                    pixelsInvalidated += rowWidth;
+                    start = x;
+                    end = x;
+                }
+            }
+            // Flush final run
+            const rowWidth = end - start + 1;
+            const rowData = new Float32Array(rowWidth * componentsPerPixel).fill(0.0);
+            const firstPixelIndex = y * this.canvasWidth + start;
+            const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
+            this.device!.queue.writeBuffer(this.cacheBuffer!, byteOffset, rowData);
+            this.invalidationWriteBufferCallCount++;
+            pixelsInvalidated += rowWidth;
+        }
 
         this.legacyInvalidationStats.totalInvalidations++;
-        this.legacyInvalidationStats.pixelsInvalidated += pixelsToInvalidate;
+        this.legacyInvalidationStats.pixelsInvalidated += pixelsInvalidated;
+    }
+
+    public setInvalidationMode(mode: 'pixel' | 'batch') {
+        this.invalidationMode = mode;
+        if (this.cacheInvalidationManager) {
+            this.cacheInvalidationManager.setMode(mode);
+        }
+    }
+
+    public getInvalidationWriteBufferCount(): number {
+        const c = this.cacheInvalidationManager ? this.cacheInvalidationManager.getWriteBufferCallCount() : 0;
+        return c + this.invalidationWriteBufferCallCount;
+    }
+
+    public resetInvalidationWriteBufferCount(): void {
+        this.invalidationWriteBufferCallCount = 0;
+        if (this.cacheInvalidationManager) {
+            this.cacheInvalidationManager.resetWriteBufferCallCount();
+        }
     }
 
     public resetCache(width: number, height: number): void {
@@ -341,7 +420,7 @@ export class BufferManager {
 
         // Updated structure with bvhEnabled flag
         const sceneConfigData = new Float32Array([
-            ground, 0, 0, 0,           // Ground Y position (from Three.js), padding
+            ground, 0, 0, 0,           // Ground Y position, padding
             light.x, light.y, light.z, 1.0,  // Light position, shadow enabled
             1.0, 8, 0.01, ambient,     // Reflections enabled, max bounces, min contribution, ambient
             this.bvhEnabled ? 1.0 : 0.0  // BVH enabled flag

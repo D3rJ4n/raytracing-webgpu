@@ -4,6 +4,7 @@ import { GEOMETRY_CACHE } from "../utils/Constants";
 export class GeometryPixelCache {
     private device: GPUDevice | null = null;
     private cacheBuffer: GPUBuffer | null = null;
+    private stagingBuffer: GPUBuffer | null = null;
     private logger: Logger;
 
     private stats = {
@@ -32,38 +33,38 @@ export class GeometryPixelCache {
 
         this.stats.totalPixels = canvasWidth * canvasHeight;
 
+        // Create staging buffer once for reuse
+        this.stagingBuffer = this.device.createBuffer({
+            size: this.cacheBuffer.size,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
         // Minimal initialization logging
     }
 
     public async readStatistics(): Promise<void> {
-        if (!this.device || !this.cacheBuffer) {
+        if (!this.device || !this.cacheBuffer || !this.stagingBuffer) {
             throw new Error('Cache-System nicht initialisiert');
         }
 
         try {
-            const stagingBuffer = this.device.createBuffer({
-                size: this.cacheBuffer.size,
-                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-            });
-
             const commandEncoder = this.device.createCommandEncoder();
             commandEncoder.copyBufferToBuffer(
                 this.cacheBuffer, 0,
-                stagingBuffer, 0,
+                this.stagingBuffer, 0,
                 this.cacheBuffer.size
             );
             this.device.queue.submit([commandEncoder.finish()]);
 
             await this.device.queue.onSubmittedWorkDone();
 
-            await stagingBuffer.mapAsync(GPUMapMode.READ);
-            const arrayBuffer = stagingBuffer.getMappedRange();
+            await this.stagingBuffer.mapAsync(GPUMapMode.READ);
+            const arrayBuffer = this.stagingBuffer.getMappedRange();
             const cacheData = new Float32Array(arrayBuffer);
 
             this.calculateStatistics(cacheData);
 
-            stagingBuffer.unmap();
-            stagingBuffer.destroy();
+            this.stagingBuffer.unmap();
 
         } catch (error) {
             this.logger.error('Fehler beim Lesen der Cache-Statistiken:', error);
@@ -137,6 +138,11 @@ export class GeometryPixelCache {
     }
 
     public cleanup(): void {
+        if (this.stagingBuffer) {
+            this.stagingBuffer.destroy();
+            this.stagingBuffer = null;
+        }
+
         this.device = null;
         this.cacheBuffer = null;
 
