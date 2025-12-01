@@ -1,6 +1,3 @@
-// ===== WGSL RENDER SHADER =====
-// Dieser Shader zeigt das Raytracing-Ergebnis auf dem Bildschirm an
-
 // Struktur für Vertex-Shader Output (wird an Fragment-Shader weitergegeben)
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,  // Bildschirm-Position des Pixels

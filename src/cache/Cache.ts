@@ -1,7 +1,7 @@
 import { Logger } from "../utils/Logger";
 import { GEOMETRY_CACHE } from "../utils/Constants";
 
-export class GeometryPixelCache {
+export class Cache {
     private device: GPUDevice | null = null;
     private cacheBuffer: GPUBuffer | null = null;
     private stagingBuffer: GPUBuffer | null = null;

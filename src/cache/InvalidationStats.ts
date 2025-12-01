@@ -12,7 +12,7 @@ export interface InvalidationStatistics {
     lastPixelsInvalidated: number;
 }
 
-export class GeometryInvalidationStats {
+export class InvalidationStats {
     private stats = {
         totalInvalidations: 0,
         totalPixelsInvalidated: 0,

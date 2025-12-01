@@ -11,7 +11,7 @@ export interface SphereData {
     radius: number;
 }
 
-export class GeometryMovementTracker {
+export class MovementTracker {
     private logger: Logger;
     private lastSpherePositions: Map<number, SpherePosition> = new Map();
     private lastSphereRadii: Map<number, number> = new Map();

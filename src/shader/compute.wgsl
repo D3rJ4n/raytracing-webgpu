@@ -1,6 +1,4 @@
-// ===== WGSL COMPUTE SHADER MIT SHADOW-CACHE UND SUPERSAMPLING + OPTIONALE BVH =====
-
-// ===== STRUKTUREN (unverändert aus Ihrem alten Code) =====
+// ===== STRUKTUREN =====
 
 struct Camera {
     position: vec3<f32>,
@@ -74,7 +72,7 @@ struct BVHNode {
     sphereCount: f32,        // 1 float - Anzahl Spheres (nur bei Leaf)
 }
 
-// ===== BINDINGS (erweitert um optionale BVH) =====
+// ===== BINDINGS  =====
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> spheres: array<SphereData>;
@@ -87,7 +85,7 @@ struct BVHNode {
 @group(0) @binding(6) var<storage, read> bvhNodes: array<f32>;        // BVH-Nodes (10 floats pro Node)
 @group(0) @binding(7) var<storage, read> bvhSphereIndices: array<u32>; // Sortierte Sphere-Indizes
 
-// ===== KONSTANTEN (unverändert aus Ihrem alten Code) =====
+// ===== KONSTANTEN  =====
 
 const MAX_SPHERES: u32 = 1000u;
 const PI: f32 = 3.14159265359;
@@ -95,7 +93,7 @@ const EPSILON: f32 = 0.001;
 
 const GROUND_MATERIAL_ID: u32 = 999u;
 
-// Cache-Layout (7 float32 pro Pixel) - unverändert
+// Cache-Layout (7 float32 pro Pixel)
 const CACHE_SPHERE_INDEX: u32 = 0u;
 const CACHE_HIT_DISTANCE: u32 = 1u;
 const CACHE_HIT_POINT_X: u32 = 2u;
@@ -109,7 +107,7 @@ const CACHE_BACKGROUND: f32 = -1.0;
 const CACHE_GROUND: f32 = -2.0;
 const SHADOW_INVALID: f32 = -1.0;
 
-// BVH-KONSTANTEN (NEU)
+// BVH-KONSTANTEN 
 const BVH_STACK_SIZE: u32 = 32u;
 const BVH_NODE_FLOATS: u32 = 10u;  // 10 floats pro BVH-Node
 
@@ -125,7 +123,7 @@ const BVH_RIGHT_CHILD: u32 = 7u;
 const BVH_FIRST_SPHERE: u32 = 8u;
 const BVH_SPHERE_COUNT: u32 = 9u;
 
-// ===== BVH-HILFSFUNKTIONEN (NEU) =====
+// ===== BVH-HILFSFUNKTIONEN =====
 
 fn loadBVHNode(nodeIndex: u32) -> BVHNode {
     let baseIndex = nodeIndex * BVH_NODE_FLOATS;
@@ -167,7 +165,7 @@ fn rayAABBIntersect(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, minBounds: ve
     return tNear <= tFar && tFar > 0.001;  // Epsilon für Stabilität
 }
 
-// ===== CACHE-FUNKTIONEN (unverändert aus Ihrem alten Code) =====
+// ===== CACHE-FUNKTIONEN =====
 
 fn getCacheBaseIndex(coords: vec2<i32>) -> u32 {
     let pixelIndex = u32(coords.y) * renderInfo.width + u32(coords.x);
@@ -214,7 +212,7 @@ fn isShadowCacheValid(cached: CachedGeometry) -> bool {
     return cached.valid && cached.shadowFactor != SHADOW_INVALID;
 }
 
-// ===== RANDOM NUMBER GENERATOR (unverändert aus Ihrem alten Code) =====
+// ===== RANDOM NUMBER GENERATOR =====
 
 fn pcgHash(input: u32) -> u32 {
     var state = input * 747796405u + 2891336453u;

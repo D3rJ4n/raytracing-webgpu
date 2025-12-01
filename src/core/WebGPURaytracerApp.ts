@@ -7,7 +7,7 @@ import { TextureManager } from '../rendering/TextureManager';
 import { ComputePipeline } from './ComputePipeline';
 import { RenderPipeline } from './RenderPipeline';
 import { Renderer } from '../rendering/Renderer';
-import { GeometryPixelCache } from '../cache/Cache';
+import { Cache } from '../cache/Cache';
 import { StatusDisplay } from '../utils/StatusDisplay';
 import { Logger } from '../utils/Logger';
 import { PerformanceMonitor } from '../utils/PerformanceMonitor';
@@ -24,7 +24,7 @@ export class WebGPURaytracerApp {
     private computePipeline: ComputePipeline;
     private renderPipeline: RenderPipeline;
     private renderer: Renderer;
-    public pixelCache: GeometryPixelCache;
+    public pixelCache: Cache;
     private performanceMonitor: PerformanceMonitor;
 
     private logger: Logger;
@@ -50,14 +50,7 @@ export class WebGPURaytracerApp {
         this.computePipeline = new ComputePipeline();
         this.renderPipeline = new RenderPipeline();
         this.renderer = new Renderer();
-        this.pixelCache = new GeometryPixelCache();
-        // Default invalidation mode - can be overridden via URL param
-        const params = new URLSearchParams(window.location.search);
-        const invalidateMode = params.get('invalidateMode');
-        if (invalidateMode === 'pixel' || invalidateMode === 'batch') {
-            this.bufferManager.setInvalidationMode(invalidateMode as 'pixel' | 'batch');
-            this.statusDisplay.showInfo(`Invalidation Mode: ${invalidateMode}`);
-        }
+        this.pixelCache = new Cache();
     }
 
     public async initialize(): Promise<void> {
@@ -187,7 +180,7 @@ export class WebGPURaytracerApp {
         return this.bufferManager;
     }
 
-    public getPixelCache(): GeometryPixelCache {
+    public getPixelCache(): Cache {
         return this.pixelCache;
     }
 

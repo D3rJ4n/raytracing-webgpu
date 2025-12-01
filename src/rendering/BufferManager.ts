@@ -1,7 +1,7 @@
 import { BUFFER_CONFIG, BVH_CONFIG, calculateCacheBufferSize } from "../utils/Constants";
 import { Logger } from "../utils/Logger";
 import { Scene } from "../scene/Scene";
-import { GeometryInvalidationManager } from "../cache/InvalidationManager";
+import { InvalidationManager } from "../cache/InvalidationManager";
 import { BVHBuilder, type BVHBuildResult } from "../acceleration/BVHBuilder";
 
 export class BufferManager {
@@ -28,8 +28,7 @@ export class BufferManager {
     private canvasWidth: number = 0;
     private canvasHeight: number = 0;
 
-    private cacheInvalidationManager: GeometryInvalidationManager | null = null;
-    private invalidationMode: 'pixel' | 'batch' = 'batch';
+    private cacheInvalidationManager: InvalidationManager | null = null;
     private invalidationWriteBufferCallCount: number = 0;
 
     private legacyInvalidationStats = {
@@ -69,10 +68,6 @@ export class BufferManager {
         this.createBVHBuffers(sphereCount);
 
         this.initializeCacheInvalidation();
-        // Apply initial invalidation mode if changed via setInvalidationMode callback
-        if (this.cacheInvalidationManager) {
-            this.cacheInvalidationManager.setMode(this.invalidationMode);
-        }
 
     }
 
@@ -156,7 +151,7 @@ export class BufferManager {
         }
 
         try {
-            this.cacheInvalidationManager = new GeometryInvalidationManager(
+            this.cacheInvalidationManager = new InvalidationManager(
                 this.device,
                 this.cacheBuffer,
                 this.canvasWidth,
@@ -181,7 +176,8 @@ export class BufferManager {
         changeInfo?: { type: 'color' | 'geometry' | 'structural', sphereIndex?: number }
     ): Promise<void> {
         if (!this.cacheInvalidationManager) {
-            await this.legacyRandomInvalidation();
+            this.logger.error('InvalidationManager nicht verfügbar, invalidiere kompletten Cache');
+            this.resetCache(this.canvasWidth, this.canvasHeight);
             return;
         }
 
@@ -219,90 +215,12 @@ export class BufferManager {
 
         } catch (error) {
             this.logger.error('Intelligente Cache-Invalidierung fehlgeschlagen:', error);
-            await this.legacyRandomInvalidation();
+            this.logger.error('Invalidiere kompletten Cache als Fallback');
+            this.resetCache(this.canvasWidth, this.canvasHeight);
         }
     }
 
-    private async legacyRandomInvalidation(): Promise<void> {
-        const totalPixels = this.canvasWidth * this.canvasHeight;
-        const pixelsToInvalidate = Math.floor(totalPixels * 0.05);
-        let pixelsInvalidated = 0;
 
-        // Create set of random pixel indices
-        const invalidPixels = new Set<number>();
-        while (invalidPixels.size < pixelsToInvalidate) {
-            invalidPixels.add(Math.floor(Math.random() * totalPixels));
-        }
-
-        // Group by row to batch writes
-        const rows = new Map<number, number[]>();
-        for (const pixelIndex of invalidPixels) {
-            const y = Math.floor(pixelIndex / this.canvasWidth);
-            const x = pixelIndex % this.canvasWidth;
-            if (!rows.has(y)) rows.set(y, []);
-            rows.get(y)!.push(x);
-        }
-
-        const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL;
-        const bytesPerComponent = BUFFER_CONFIG.CACHE.BYTES_PER_COMPONENT;
-
-        if (this.invalidationMode === 'pixel') {
-            // fallback: per pixel writes
-            for (const [y, xs] of rows.entries()) {
-                for (const x of xs) {
-                    const pixelIndex = y * this.canvasWidth + x;
-                    const validFlagOffset = pixelIndex * 7 * 4 + 6 * 4;
-                    this.device!.queue.writeBuffer(this.cacheBuffer!, validFlagOffset, new Float32Array([0.0]));
-                    this.invalidationWriteBufferCallCount++;
-                    pixelsInvalidated++;
-                }
-            }
-            this.legacyInvalidationStats.totalInvalidations++;
-            this.legacyInvalidationStats.pixelsInvalidated += pixelsInvalidated;
-            return;
-        }
-
-        // Write batched rows using contiguous runs per row
-        for (const [y, xs] of rows.entries()) {
-            xs.sort((a, b) => a - b);
-            let start = xs[0];
-            let end = xs[0];
-            for (let i = 1; i < xs.length; i++) {
-                const x = xs[i];
-                if (x === end + 1) {
-                    end = x;
-                } else {
-                    const rowWidth = end - start + 1;
-                    const rowData = new Float32Array(rowWidth * componentsPerPixel).fill(0.0);
-                    const firstPixelIndex = y * this.canvasWidth + start;
-                    const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
-                    this.device!.queue.writeBuffer(this.cacheBuffer!, byteOffset, rowData);
-                    this.invalidationWriteBufferCallCount++;
-                    pixelsInvalidated += rowWidth;
-                    start = x;
-                    end = x;
-                }
-            }
-            // Flush final run
-            const rowWidth = end - start + 1;
-            const rowData = new Float32Array(rowWidth * componentsPerPixel).fill(0.0);
-            const firstPixelIndex = y * this.canvasWidth + start;
-            const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
-            this.device!.queue.writeBuffer(this.cacheBuffer!, byteOffset, rowData);
-            this.invalidationWriteBufferCallCount++;
-            pixelsInvalidated += rowWidth;
-        }
-
-        this.legacyInvalidationStats.totalInvalidations++;
-        this.legacyInvalidationStats.pixelsInvalidated += pixelsInvalidated;
-    }
-
-    public setInvalidationMode(mode: 'pixel' | 'batch') {
-        this.invalidationMode = mode;
-        if (this.cacheInvalidationManager) {
-            this.cacheInvalidationManager.setMode(mode);
-        }
-    }
 
     public getInvalidationWriteBufferCount(): number {
         const c = this.cacheInvalidationManager ? this.cacheInvalidationManager.getWriteBufferCallCount() : 0;
@@ -504,7 +422,7 @@ export class BufferManager {
             this.lastSphereHash = currentHash;
             this.lastSphereCount = sphereCount;
 
-            // WICHTIG: Gecachte Daten aktualisieren BEVOR wir GPU schreiben!
+            // Gecachte Daten aktualisieren BEVOR wir GPU schreiben!
             this.spheresData = spheresData;
 
             // GPU Buffer aktualisieren

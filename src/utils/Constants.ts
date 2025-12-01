@@ -39,16 +39,6 @@ export const BVH_CONFIG = {
     FLOATS_PER_NODE: 10,         // 10 Bounds + 2 Child-Indizes
     BYTES_PER_NODE: 40,         // 8 * 4 bytes
     ENABLED: true,              // BVH aktiviert/deaktiviert
-
-    // Node-Layout (8 floats)
-    NODE_MIN_X: 0,
-    NODE_MIN_Y: 1,
-    NODE_MIN_Z: 2,
-    NODE_MAX_X: 3,
-    NODE_MAX_Y: 4,
-    NODE_MAX_Z: 5,
-    NODE_FIRST_SPHERE: 8,
-    NODE_SPHERE_COUNT: 9,
 } as const;
 
 
@@ -137,19 +127,6 @@ export const TEXTURE_CONFIG = {
     LABEL: 'Render Texture',
 } as const;
 
-
-export const PERFORMANCE_CONFIG = {
-    CACHE_STATS_INTERVAL: 10,
-    CACHE_STATS_INITIAL_FRAMES: 4,
-    FRAME_DELAY_MS: 500,
-    GPU_WAIT_MS: 200,
-} as const;
-
-export const DEBUG_CONFIG = {
-    PIXEL_SAMPLE_COUNT: 10,
-    LOG_LEVEL: 'INFO' as 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR',
-} as const;
-
 export const BINDING_CONFIG = {
     COMPUTE: {
         CAMERA: 0,
@@ -184,41 +161,5 @@ export function calculateWorkgroups(width: number, height: number): { x: number;
     return {
         x: Math.ceil(width / SHADER_CONFIG.WORKGROUP_SIZE.X),
         y: Math.ceil(height / SHADER_CONFIG.WORKGROUP_SIZE.Y),
-    };
-}
-
-export function calculateLightHash(lightPos: { x: number; y: number; z: number }): number {
-    // Einfacher Hash aus Lichtposition
-    const x = Math.floor(lightPos.x * 1000);
-    const y = Math.floor(lightPos.y * 1000);
-    const z = Math.floor(lightPos.z * 1000);
-    return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % 2147483647;
-}
-
-export function calculateBVHNodesBufferSize(sphereCount: number): number {
-    // Pessimistische Schätzung: 2 * sphereCount Nodes für binären Baum
-    const estimatedNodes = Math.max(100, sphereCount * 2);
-    return estimatedNodes * BVH_CONFIG.BYTES_PER_NODE;
-}
-
-export function calculateBVHIndicesBufferSize(sphereCount: number): number {
-    return sphereCount * BUFFER_CONFIG.BVH_SPHERE_INDICES.BYTES_PER_INDEX;
-}
-
-export function getBVHMemoryUsage(nodeCount: number, sphereCount: number): {
-    nodesBytes: number;
-    indicesBytes: number;
-    totalBytes: number;
-    totalKB: number;
-} {
-    const nodesBytes = nodeCount * BVH_CONFIG.BYTES_PER_NODE;
-    const indicesBytes = sphereCount * BUFFER_CONFIG.BVH_SPHERE_INDICES.BYTES_PER_INDEX;
-    const totalBytes = nodesBytes + indicesBytes;
-
-    return {
-        nodesBytes,
-        indicesBytes,
-        totalBytes,
-        totalKB: totalBytes / 1024
     };
 }

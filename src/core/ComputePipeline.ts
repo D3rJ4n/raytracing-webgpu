@@ -217,7 +217,7 @@ export class ComputePipeline {
 
         this.logger.pipeline('Erstelle Compute Bind Group...');
 
-        // Basis-Entries (unverändert)
+        // Basis-Entries 
         const baseEntries: GPUBindGroupEntry[] = [
             {
                 binding: BINDING_CONFIG.COMPUTE.CAMERA,

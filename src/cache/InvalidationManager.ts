@@ -1,9 +1,9 @@
 // InvalidationManager mit selektiver Invalidierung (BVH-kompatibel)
 
 import { Logger } from '../utils/Logger';
-import { GeometryMovementTracker } from './MovementTracker';
-import { GeometryScreenProjection } from './ScreenProjection';
-import { GeometryInvalidationStats } from './InvalidationStats';
+import { MovementTracker } from './MovementTracker';
+import { ScreenProjection } from './ScreenProjection';
+import { InvalidationStats } from './InvalidationStats';
 import { BUFFER_CONFIG } from '../utils/Constants';
 
 export interface InvalidationResult {
@@ -13,16 +13,16 @@ export interface InvalidationResult {
     cameraInvalidation: boolean;
 }
 
-export class GeometryInvalidationManager {
+export class InvalidationManager {
     private device: GPUDevice;
     private cacheBuffer: GPUBuffer;
     private canvasWidth: number;
     private canvasHeight: number;
     private logger: Logger;
 
-    private movementTracker: GeometryMovementTracker;
-    private screenProjection: GeometryScreenProjection;
-    private stats: GeometryInvalidationStats;
+    private movementTracker: MovementTracker;
+    private screenProjection: ScreenProjection;
+    private stats: InvalidationStats;
 
     // Szenen-Daten für Shadow Bounds Berechnung
     private lightPosition: { x: number; y: number; z: number } = { x: 0, y: 10, z: 0 };
@@ -32,8 +32,6 @@ export class GeometryInvalidationManager {
     private debugMode: boolean = true;
     // Instrumentation: count host writeBuffer calls (helps measure improvement)
     private writeBufferCallCount: number = 0;
-    // Operation mode: 'pixel' writes per-pixel, 'batch' uses row batching
-    private mode: 'pixel' | 'batch' = 'batch';
 
     constructor(
         device: GPUDevice,
@@ -47,9 +45,9 @@ export class GeometryInvalidationManager {
         this.canvasHeight = canvasHeight;
         this.logger = Logger.getInstance();
 
-        this.movementTracker = new GeometryMovementTracker();
-        this.screenProjection = new GeometryScreenProjection(canvasWidth, canvasHeight);
-        this.stats = new GeometryInvalidationStats();
+        this.movementTracker = new MovementTracker();
+        this.screenProjection = new ScreenProjection(canvasWidth, canvasHeight);
+        this.stats = new InvalidationStats();
 
         this.logger.cache('InvalidationManager mit selektiver Invalidierung initialisiert');
     }
@@ -68,8 +66,7 @@ export class GeometryInvalidationManager {
         this.groundY = y;
     }
 
-    public setMode(mode: 'pixel' | 'batch') {
-        this.mode = mode;
+    public resetWriteBufferCount(): void {
         this.writeBufferCallCount = 0;
     }
 
@@ -180,27 +177,9 @@ export class GeometryInvalidationManager {
                     sphereData.radius
                 );
 
-                // 2. SCHATTEN-BOUNDS (DEAKTIVIERT wegen Performance-Problem)
-                // TODO: writeBuffer-Schleife muss optimiert werden, bevor Shadow Bounds aktiviert werden können
-                // const oldShadowBounds = this.screenProjection.calculateShadowBounds(
-                //     oldPosition,
-                //     sphereData.radius,
-                //     this.lightPosition,
-                //     this.groundY
-                // );
-                // const newShadowBounds = this.screenProjection.calculateShadowBounds(
-                //     sphereData.position,
-                //     sphereData.radius,
-                //     this.lightPosition,
-                //     this.groundY
-                // );
-
-                // 3. NUR KUGEL-BEREICHE vereinigen (Shadow Bounds deaktiviert für Performance)
                 const allBounds = [
                     oldSphereBounds,
                     newSphereBounds
-                    // oldShadowBounds,  // Deaktiviert
-                    // newShadowBounds   // Deaktiviert
                 ];
                 const combinedBounds = this.screenProjection.unionMultipleBounds(allBounds);
                 const expandedBounds = this.screenProjection.expandBounds(combinedBounds, 10);
@@ -236,7 +215,9 @@ export class GeometryInvalidationManager {
     }
 
     /**
-     * Region invalidieren (sichere Version für BVH-kompatiblen Cache mit 7 floats)
+     * Region invalidieren mit Contiguous Runs Optimierung
+     * Für rechteckige Bounds ist jede Zeile vollständig zusammenhängend,
+     * daher ein writeBuffer pro Zeile (optimal für Bounds-basierte Invalidierung)
      */
     private async invalidateRegion(bounds: {
         minX: number; minY: number; maxX: number; maxY: number;
@@ -258,26 +239,13 @@ export class GeometryInvalidationManager {
         const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL; // 7
         const bytesPerComponent = BUFFER_CONFIG.CACHE.BYTES_PER_COMPONENT; // 4
 
-        // Row-batched invalidation: write contiguous runs per row (or per-pixel mode)
-        if (this.mode === 'pixel') {
-            // Pixel-for-pixel invalidation
-            for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
-                for (let x = safeBounds.minX; x <= safeBounds.maxX; x++) {
-                    const pixelIndex = y * this.canvasWidth + x;
-                    const validFlagByteOffset = pixelIndex * componentsPerPixel * bytesPerComponent + (6 * bytesPerComponent);
-                    this.device.queue.writeBuffer(this.cacheBuffer, validFlagByteOffset, new Float32Array([0.0]));
-                    this.writeBufferCallCount++;
-                    pixelsInvalidated++;
-                }
-            }
-            return pixelsInvalidated;
-        }
-
-        // Batch per-row if mode is 'batch'
+        // Contiguous run per row: Bei rechteckigen Bounds ist die gesamte
+        // Zeile zwischen minX und maxX zusammenhängend, daher optimal
         for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
             const rowWidth = safeBounds.maxX - safeBounds.minX + 1;
             if (rowWidth <= 0) continue;
 
+            // Erstelle Array nur für die betroffene Region (minX bis maxX)
             const rowData = new Float32Array(rowWidth * componentsPerPixel).fill(0.0);
             const firstPixelIndex = y * this.canvasWidth + safeBounds.minX;
             const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
