@@ -69,9 +69,9 @@ export const BUFFER_CONFIG = {
         LABEL: 'Scene Config Buffer',
     },
     CACHE: {
-        COMPONENTS_PER_PIXEL: 7,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, valid
+        COMPONENTS_PER_PIXEL: 6,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, valid
         BYTES_PER_COMPONENT: 4,      // 4 bytes pro float32
-        BYTES_PER_PIXEL: 28,         // 7 * 4 = 28 bytes pro Pixel
+        BYTES_PER_PIXEL: 24,         // 6 * 4 = 24 bytes pro Pixel
         LABEL: 'Geometry Cache Buffer',
     },
     // BVH-BUFFERS
@@ -105,10 +105,9 @@ export const GEOMETRY_CACHE = {
     SPHERE_INDEX: 0,    // Index 0: Welche Sphere (als float, 0.0 = invalid)
     HIT_DISTANCE: 1,    // Index 1: Entfernung zum Hit-Point
     HIT_POINT_X: 2,     // Index 2: Hit-Point X-Koordinate
-    HIT_POINT_Y: 3,     // Index 3: Hit-Point Y-Koordinate  
+    HIT_POINT_Y: 3,     // Index 3: Hit-Point Y-Koordinate
     HIT_POINT_Z: 4,     // Index 4: Hit-Point Z-Koordinate
-    SHADOW_FACTOR: 5,   // Index 5: Schatten-Faktor (0.0=Schatten, 1.0=Licht)
-    VALID_FLAG: 6,      // Index 6: 1.0 = valid, 0.0 = invalid
+    VALID_FLAG: 5,      // Index 5: 1.0 = valid, 0.0 = invalid
     // Spezielle Werte für SPHERE_INDEX
     INVALID_VALUE: 0.0,      // Kein Hit
     BACKGROUND_VALUE: -1.0,  // Background Hit

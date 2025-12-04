@@ -141,7 +141,7 @@ export class BufferManager {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
         });
 
-        const cacheData = new Float32Array(pixelCount * 7).fill(0.0);
+        const cacheData = new Float32Array(pixelCount * BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
     }
 
@@ -157,10 +157,6 @@ export class BufferManager {
                 this.canvasWidth,
                 this.canvasHeight
             );
-
-            // Setze initiale Lichtposition und GroundY (wird später via Scene aktualisiert)
-            this.cacheInvalidationManager.setLightPosition({ x: 0, y: 10, z: 0 });
-            this.cacheInvalidationManager.setGroundY(-1.0);
         } catch (error) {
             this.logger.error('Cache-Invalidierung-Manager konnte nicht initialisiert werden:', error);
         }
@@ -183,12 +179,6 @@ export class BufferManager {
 
         const spheresData = scene.getSpheresData();
         const cameraData = scene.getCameraData();
-
-        // Update Lichtposition und GroundY für Shadow Bounds Berechnung
-        const lightPos = scene.getPrimaryLightPosition();
-        const groundY = scene.getGroundY();
-        this.cacheInvalidationManager.setLightPosition(lightPos);
-        this.cacheInvalidationManager.setGroundY(groundY);
 
         try {
             // Entscheide zwischen vollständiger und selektiver Invalidation
@@ -240,7 +230,7 @@ export class BufferManager {
         }
 
         const pixelCount = width * height;
-        const cacheData = new Float32Array(pixelCount * 7).fill(0.0);
+        const cacheData = new Float32Array(pixelCount * BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
     }
 

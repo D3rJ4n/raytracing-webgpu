@@ -59,10 +59,9 @@ struct CachedGeometry {
     sphereIndex: f32,
     hitDistance: f32,
     hitPoint: vec3<f32>,
-    shadowFactor: f32,
 }
 
-// BVH NODE STRUKTUR (NEU - nur wenn BVH aktiv)
+// BVH NODE STRUKTUR 
 struct BVHNode {
     minBounds: vec3<f32>,    // 3 floats
     maxBounds: vec3<f32>,    // 3 floats
@@ -81,7 +80,7 @@ struct BVHNode {
 @group(0) @binding(4) var<storage, read_write> geometryCache: array<f32>;
 @group(0) @binding(5) var<uniform> sceneConfig: SceneConfig;
 
-// BVH-BINDINGS (NEU - nur wenn BVH aktiv)
+// BVH-BINDINGS 
 @group(0) @binding(6) var<storage, read> bvhNodes: array<f32>;        // BVH-Nodes (10 floats pro Node)
 @group(0) @binding(7) var<storage, read> bvhSphereIndices: array<u32>; // Sortierte Sphere-Indizes
 
@@ -93,19 +92,17 @@ const EPSILON: f32 = 0.001;
 
 const GROUND_MATERIAL_ID: u32 = 999u;
 
-// Cache-Layout (7 float32 pro Pixel)
+// Cache-Layout (6 float32 pro Pixel)
 const CACHE_SPHERE_INDEX: u32 = 0u;
 const CACHE_HIT_DISTANCE: u32 = 1u;
 const CACHE_HIT_POINT_X: u32 = 2u;
 const CACHE_HIT_POINT_Y: u32 = 3u;
 const CACHE_HIT_POINT_Z: u32 = 4u;
-const CACHE_SHADOW_FACTOR: u32 = 5u;
-const CACHE_VALID_FLAG: u32 = 6u;
+const CACHE_VALID_FLAG: u32 = 5u;
 
 const CACHE_INVALID: f32 = 0.0;
 const CACHE_BACKGROUND: f32 = -1.0;
 const CACHE_GROUND: f32 = -2.0;
-const SHADOW_INVALID: f32 = -1.0;
 
 // BVH-KONSTANTEN 
 const BVH_STACK_SIZE: u32 = 32u;
@@ -169,9 +166,9 @@ fn rayAABBIntersect(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, minBounds: ve
 
 fn getCacheBaseIndex(coords: vec2<i32>) -> u32 {
     let pixelIndex = u32(coords.y) * renderInfo.width + u32(coords.x);
-    let baseIndex = pixelIndex * 7u;
-    let totalFloats = renderInfo.width * renderInfo.height * 7u;
-    if (baseIndex + 6u >= totalFloats) {
+    let baseIndex = pixelIndex * 6u;
+    let totalFloats = renderInfo.width * renderInfo.height * 6u;
+    if (baseIndex + 5u >= totalFloats) {
         return 0u;
     }
     return baseIndex;
@@ -182,14 +179,13 @@ fn isCacheValid(coords: vec2<i32>) -> bool {
     return geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
 }
 
-fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>, shadowFactor: f32) {
+fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>) {
     let baseIndex = getCacheBaseIndex(coords);
     geometryCache[baseIndex + CACHE_SPHERE_INDEX] = sphereIndex;
     geometryCache[baseIndex + CACHE_HIT_DISTANCE] = hitDistance;
     geometryCache[baseIndex + CACHE_HIT_POINT_X] = hitPoint.x;
     geometryCache[baseIndex + CACHE_HIT_POINT_Y] = hitPoint.y;
     geometryCache[baseIndex + CACHE_HIT_POINT_Z] = hitPoint.z;
-    geometryCache[baseIndex + CACHE_SHADOW_FACTOR] = shadowFactor;
     geometryCache[baseIndex + CACHE_VALID_FLAG] = 1.0;
 }
 
@@ -204,12 +200,7 @@ fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
         geometryCache[baseIndex + CACHE_HIT_POINT_Y],
         geometryCache[baseIndex + CACHE_HIT_POINT_Z]
     );
-    cached.shadowFactor = geometryCache[baseIndex + CACHE_SHADOW_FACTOR];
     return cached;
-}
-
-fn isShadowCacheValid(cached: CachedGeometry) -> bool {
-    return cached.valid && cached.shadowFactor != SHADOW_INVALID;
 }
 
 // ===== RANDOM NUMBER GENERATOR =====
@@ -562,17 +553,15 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         centerRay.direction = getCameraRay(centerUV);
         
         let centerHit = findClosestHit(centerRay);
-        
+
         if (centerHit.hit) {
-            // Schatten wird NICHT gecacht, daher Dummy-Wert (wird nie verwendet)
-            let dummyShadow = 1.0;
             if (centerHit.material == GROUND_MATERIAL_ID) {
-                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point, dummyShadow);
+                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point);
             } else {
-                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point, dummyShadow);
+                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point);
             }
         } else {
-            setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0), 1.0);
+            setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0));
         }
     }
     

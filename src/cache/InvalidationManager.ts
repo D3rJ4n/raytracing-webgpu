@@ -24,10 +24,6 @@ export class InvalidationManager {
     private screenProjection: ScreenProjection;
     private stats: InvalidationStats;
 
-    // Szenen-Daten für Shadow Bounds Berechnung
-    private lightPosition: { x: number; y: number; z: number } = { x: 0, y: 10, z: 0 };
-    private groundY: number = -1.0;
-
     // DEBUG: Aktiviere detailliertes Logging
     private debugMode: boolean = true;
     // Instrumentation: count host writeBuffer calls (helps measure improvement)
@@ -50,20 +46,6 @@ export class InvalidationManager {
         this.stats = new InvalidationStats();
 
         this.logger.cache('InvalidationManager mit selektiver Invalidierung initialisiert');
-    }
-
-    /**
-     * Setze Lichtposition für Shadow Bounds Berechnung
-     */
-    public setLightPosition(position: { x: number; y: number; z: number }): void {
-        this.lightPosition = position;
-    }
-
-    /**
-     * Setze Ground Y Position für Shadow Bounds Berechnung
-     */
-    public setGroundY(y: number): void {
-        this.groundY = y;
     }
 
     public resetWriteBufferCount(): void {
@@ -148,7 +130,7 @@ export class InvalidationManager {
     }
 
     /**
-     * Objekt-Bewegungen - Selektive Cache-Invalidierung MIT SCHATTEN
+     * Objekt-Bewegungen - Selektive Cache-Invalidierung
      */
     private async handleObjectMovements(
         movedSpheres: number[],
@@ -159,7 +141,7 @@ export class InvalidationManager {
         let regionsCount = 0;
 
         if (this.debugMode) {
-            this.logger.cache(`Verarbeite ${movedSpheres.length} bewegte Spheres (inkl. Schatten)...`);
+            this.logger.cache(`Verarbeite ${movedSpheres.length} bewegte Spheres...`);
         }
 
         for (const sphereIndex of movedSpheres) {
@@ -167,7 +149,7 @@ export class InvalidationManager {
             const oldPosition = this.movementTracker.getLastPosition(sphereIndex);
 
             if (oldPosition && sphereData) {
-                // 1. KUGEL-BOUNDS (alte + neue Position)
+                // KUGEL-BOUNDS (alte + neue Position)
                 const oldSphereBounds = this.screenProjection.sphereToScreenBounds(
                     oldPosition,
                     sphereData.radius
@@ -177,11 +159,10 @@ export class InvalidationManager {
                     sphereData.radius
                 );
 
-                const allBounds = [
+                const combinedBounds = this.screenProjection.unionMultipleBounds([
                     oldSphereBounds,
                     newSphereBounds
-                ];
-                const combinedBounds = this.screenProjection.unionMultipleBounds(allBounds);
+                ]);
                 const expandedBounds = this.screenProjection.expandBounds(combinedBounds, 10);
 
                 // Prüfe ob Bounds gültig sind

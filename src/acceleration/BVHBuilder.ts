@@ -11,15 +11,15 @@ export interface BVHNode {
     maxY: number;
     maxZ: number;
 
-    // Node Info (4 floats) - KORRIGIERT!
+    // Node Info (4 floats)
     leftChild: number;   // Index des linken Kindes (-1 = Leaf)
     rightChild: number;  // Index des rechten Kindes
-    firstSphere: number; // Index des ersten Spheres in sphereIndices (NEU!)
-    sphereCount: number; // Anzahl Spheres in diesem Leaf (NEU!)
+    firstSphere: number; // Index des ersten Spheres in sphereIndices 
+    sphereCount: number; // Anzahl Spheres in diesem Leaf
 }
 
 export interface BVHBuildResult {
-    nodes: Float32Array;        // Flaches Array für GPU (nodes * 10 floats) - KORRIGIERT!
+    nodes: Float32Array;        // Flaches Array für GPU (nodes * 10 floats) 
     sphereIndices: Uint32Array; // Sortierte Sphere-Indizes
     nodeCount: number;
     maxDepth: number;
@@ -51,27 +51,17 @@ export class BVHBuilder {
         this.logger.cache('🌳 Starte BVH-Build...');
         this.resetBuildStats();
 
-        // 1. Sphere-Informationen extrahieren
+
         const spheres = this.extractSpheres(spheresData, sphereCount);
 
-        // 2. indexieren der Spheres
         const sphereIndices: number[] = Array.from({ length: sphereCount }, (_, i) => i);
 
-        // 3. Temporärer Node-Container
         const tempNodes: BVHNode[] = [];
 
-        // 4. Rekursiven Build starten
         this.buildNodeRecursive(spheres, sphereIndices, 0, sphereCount, tempNodes, 0);
 
-        // 5. Flache Arrays für GPU erstellen
         const result = this.createGPUArrays(tempNodes, sphereIndices);
 
-        // DEBUG deaktiviert für Performance-Tests
-        // console.log(`🔍 BVH Debug:`);
-        // console.log(`├─ Temp nodes count: ${tempNodes.length}`);
-        // ...
-
-        // 6. Statistiken loggen
         this.buildStats.buildTime = performance.now() - startTime;
         this.logBuildStats(sphereCount, result);
 

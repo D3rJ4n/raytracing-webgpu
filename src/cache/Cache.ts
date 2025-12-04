@@ -1,5 +1,5 @@
 import { Logger } from "../utils/Logger";
-import { GEOMETRY_CACHE } from "../utils/Constants";
+import { GEOMETRY_CACHE, BUFFER_CONFIG } from "../utils/Constants";
 
 export class Cache {
     private device: GPUDevice | null = null;
@@ -77,7 +77,7 @@ export class Cache {
         let misses = 0;
 
         for (let i = 0; i < this.stats.totalPixels; i++) {
-            const baseIndex = i * 7;
+            const baseIndex = i * BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL;
 
             if (baseIndex + GEOMETRY_CACHE.VALID_FLAG >= cacheData.length) {
                 misses++;
@@ -124,7 +124,7 @@ export class Cache {
         }
 
         const pixelCount = this.canvasWidth * this.canvasHeight;
-        const cacheData = new Float32Array(pixelCount * 7).fill(0.0);
+        const cacheData = new Float32Array(pixelCount * BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL).fill(0.0);
         this.device.queue.writeBuffer(this.cacheBuffer, 0, cacheData);
 
         this.stats.cacheHits = 0;
