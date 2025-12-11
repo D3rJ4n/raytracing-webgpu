@@ -14,7 +14,7 @@ export class BufferManager {
     private cacheBuffer: GPUBuffer | null = null;
     private sceneConfigBuffer: GPUBuffer | null = null;
 
-    // BVH-BUFFERS 
+    // BVH-BUFFERS
     private bvhNodesBuffer: GPUBuffer | null = null;
     private bvhSphereIndicesBuffer: GPUBuffer | null = null;
 
@@ -58,7 +58,7 @@ export class BufferManager {
         this.canvasHeight = canvasHeight;
 
         const sphereCount = Math.floor(sphereData.length / 8);
-        this.lastSphereCount = sphereCount; // ⚡ Initialize sphere count
+        this.lastSphereCount = sphereCount;
 
         this.createCameraBuffer();
         this.createSpheresBuffer();
@@ -182,23 +182,37 @@ export class BufferManager {
 
         try {
             // Entscheide zwischen vollständiger und selektiver Invalidation
-            let result;
+            const result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
 
-            if (changeInfo?.type === 'structural' || !changeInfo) {
-                // Strukturelle Änderung oder keine Info → Komplette Invalidation
-                result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
-                console.log(`🔄 Cache: Komplette Invalidation (${result.pixelsInvalidated} pixels)`);
-            } else if (changeInfo.sphereIndex !== undefined) {
-                // Einzelne Sphere geändert → Selektive Invalidation
-                // TODO: Implementiere invalidateSphere in CacheInvalidationManager
-                // Für jetzt: Benutze vollständige Invalidation
-                result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
-                console.log(`🎯 Cache: Selektive Invalidation für Sphere ${changeInfo.sphereIndex} (${result.pixelsInvalidated} pixels)`);
-            } else {
-                // Fallback
-                result = await this.cacheInvalidationManager.invalidateForFrame(spheresData, cameraData);
-            }
+            this.legacyInvalidationStats.totalInvalidations++;
+            this.legacyInvalidationStats.pixelsInvalidated += result.pixelsInvalidated;
+            this.legacyInvalidationStats.lastInvalidationTime = result.invalidationTime;
 
+        } catch (error) {
+            this.logger.error('Intelligente Cache-Invalidierung fehlgeschlagen:', error);
+            this.logger.error('Invalidiere kompletten Cache als Fallback');
+            this.resetCache(this.canvasWidth, this.canvasHeight);
+        }
+    }
+
+    /**
+     * Cache-Invalidierung mit expliziten alten und neuen Sphere-Daten
+     * WICHTIG: Für selektive Invalidierung brauchen wir die ALTEN Daten zum Vergleich!
+     */
+    private async invalidateForSceneChangesWithOldData(
+        oldSpheresData: Float32Array,
+        newSpheresData: Float32Array,
+        cameraData: Float32Array,
+        changeInfo?: { type: 'color' | 'geometry' | 'structural', sphereIndex?: number }
+    ): Promise<void> {
+        if (!this.cacheInvalidationManager) {
+            this.logger.error('InvalidationManager nicht verfügbar, invalidiere kompletten Cache');
+            this.resetCache(this.canvasWidth, this.canvasHeight);
+            return;
+        }
+
+        try {
+            const result = await this.cacheInvalidationManager.invalidateForFrame(newSpheresData, cameraData);
             this.legacyInvalidationStats.totalInvalidations++;
             this.legacyInvalidationStats.pixelsInvalidated += result.pixelsInvalidated;
             this.legacyInvalidationStats.lastInvalidationTime = result.invalidationTime;
@@ -289,7 +303,7 @@ export class BufferManager {
 
         this.spheresBuffer = this.device.createBuffer({
             label: BUFFER_CONFIG.SPHERE.LABEL,
-            size: BUFFER_CONFIG.SPHERES.SIZE,
+            size: this.spheresData.byteLength,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
 
@@ -368,7 +382,30 @@ export class BufferManager {
     }
 
     private lastSphereHash: string = '';
-    private lastSphereCount: number = 0; // ⚡ Track sphere count for BVH rebuild
+    private lastSphereCount: number = 0;
+
+    /**
+     * Update Kamera-Daten von Scene (für Raycasting-Sync)
+     */
+    public async updateCameraFromScene(scene: Scene): Promise<void> {
+        if (!this.device || !this.cameraBuffer) {
+            throw new Error('BufferManager nicht initialisiert');
+        }
+
+        const cameraData = scene.getCameraData();
+        this.cameraData = cameraData;
+
+        // Erweitere Camera-Data mit Random-Seeds und Sample-Count
+        const extendedData = new Float32Array(12);
+        extendedData.set(cameraData.slice(0, 8), 0);
+        extendedData[8] = 0;  // randomSeed1
+        extendedData[9] = 0;  // randomSeed2
+        extendedData[10] = 0; // sampleCount
+        extendedData[11] = 0; // padding
+
+        this.device.queue.writeBuffer(this.cameraBuffer, 0, extendedData);
+        this.logger.buffer('Kamera-Daten aktualisiert');
+    }
 
     /**
      * Update Spheres mit intelligentem BVH-Handling und selektiver Cache-Invalidation
@@ -379,62 +416,44 @@ export class BufferManager {
         scene: Scene,
         changeInfo?: { type: 'color' | 'geometry' | 'structural', sphereIndex?: number }
     ): Promise<void> {
-        // ===== NULL-CHECKS =====
-        if (!this.device) {
-            throw new Error('BufferManager nicht initialisiert - device ist null');
-        }
-        if (!this.spheresBuffer) {
-            throw new Error('BufferManager nicht initialisiert - spheresBuffer ist null');
+        if (!this.device || !this.spheresBuffer) {
+            throw new Error('BufferManager nicht initialisiert');
         }
 
         const spheresData = scene.getSpheresData();
         const sphereCount = scene.getSphereCount();
 
-        // Prüfe ob sich Spheres tatsächlich geändert haben
+        if (this.spheresData === null && this.cacheInvalidationManager) {
+            await this.cacheInvalidationManager.invalidateForFrame(spheresData, scene.getCameraData());
+        }
+
         const currentHash = this.hashSphereData(spheresData);
         const spheresChanged = currentHash !== this.lastSphereHash || changeInfo !== undefined;
         const sphereCountChanged = sphereCount !== this.lastSphereCount;
-
-        // ⚡ DEBUG
-        console.log(`🔍 updateSpheresFromScene: sphereCount=${sphereCount}, lastCount=${this.lastSphereCount}, changed=${sphereCountChanged}`);
-
-        // Auto-detect structural change
-        let changeType = changeInfo?.type || (sphereCountChanged ? 'structural' : 'geometry');
+        const changeType = changeInfo?.type || (sphereCountChanged ? 'structural' : 'geometry');
         const finalChangeInfo = changeInfo || { type: changeType, sphereIndex: undefined };
 
         if (spheresChanged) {
-            // ⚡ FIX: RenderInfo aktualisieren wenn sich Sphere-Anzahl ändert!
-            // WICHTIG: VOR dem Update von lastSphereCount, damit spheresData korrekt ist
-            if (sphereCountChanged) {
-                console.log(`⚡ CALLING updateRenderInfo() because sphereCount changed: ${this.lastSphereCount} → ${sphereCount}`);
+            if (this.spheresData !== null) {
+                await this.invalidateForSceneChangesWithOldData(this.spheresData, spheresData, scene.getCameraData(), finalChangeInfo);
+            } else {
+                await this.invalidateForSceneChanges(scene, finalChangeInfo);
             }
+
+            this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
 
             this.lastSphereHash = currentHash;
             this.lastSphereCount = sphereCount;
-
-            // Gecachte Daten aktualisieren BEVOR wir GPU schreiben!
             this.spheresData = spheresData;
 
-            // GPU Buffer aktualisieren
-            this.device.queue.writeBuffer(this.spheresBuffer, 0, new Float32Array(spheresData));
-
-            // RenderInfo NACH dem Update der spheresData
             if (sphereCountChanged) {
                 this.updateRenderInfo();
             }
 
-            // BVH Rebuild Entscheidung
-            const needsBVHRebuild = this.bvhEnabled && (
-                changeType === 'geometry' ||
-                changeType === 'structural'
-            );
-
+            const needsBVHRebuild = this.bvhEnabled && (changeType === 'geometry' || changeType === 'structural');
             if (needsBVHRebuild) {
                 this.buildBVH(spheresData, sphereCount);
             }
-
-            // Cache invalidieren (mit changeInfo für Optimierung)
-            await this.invalidateForSceneChanges(scene, finalChangeInfo);
         }
     }
 
@@ -457,16 +476,11 @@ export class BufferManager {
             this.buildBVH(this.spheresData, sphereCount);
             this.logger.buffer('BVH aktiviert');
         } else if (!enabled && wasEnabled) {
-            // ⚡ BVH deaktivieren: KOMPLETTEN Buffer mit Nullen füllen
             if (this.device && this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
-                // WICHTIG: Float32Array(0) schreibt NUR 0 Bytes, der Rest bleibt unverändert!
-                // Wir müssen den KOMPLETTEN Buffer mit Nullen überschreiben
                 const nodesBufferSize = BUFFER_CONFIG.BVH_NODES.SIZE;
                 const indicesBufferSize = BUFFER_CONFIG.BVH_SPHERE_INDICES.SIZE;
-
-                // Nullen für kompletten Buffer
-                const emptyNodes = new Float32Array(nodesBufferSize / 4); // 4 Bytes pro Float32
-                const emptyIndices = new Uint32Array(indicesBufferSize / 4); // 4 Bytes pro Uint32
+                const emptyNodes = new Float32Array(nodesBufferSize / 4);
+                const emptyIndices = new Uint32Array(indicesBufferSize / 4);
 
                 this.device.queue.writeBuffer(this.bvhNodesBuffer, 0, emptyNodes);
                 this.device.queue.writeBuffer(this.bvhSphereIndicesBuffer, 0, emptyIndices);
@@ -514,14 +528,9 @@ export class BufferManager {
             throw new Error('Buffer Manager nicht initialisiert');
         }
 
-        // ⚡ FIX: Verwende lastSphereCount statt spheresData.length!
-        // spheresData hat immer die Größe für maxSpheres (1000), nicht die tatsächliche Anzahl
         const sphereCount = this.lastSphereCount;
         const renderInfoData = new Uint32Array([this.canvasWidth, this.canvasHeight, sphereCount, Math.floor(frameTime)]);
         this.device.queue.writeBuffer(this.renderInfoBuffer, 0, renderInfoData);
-
-        // ⚡ DEBUG: Log sphere count updates mit allen Details
-        console.log(`📊 RenderInfo GPU Update: width=${this.canvasWidth}, height=${this.canvasHeight}, sphereCount=${sphereCount}, lastSphereCount=${this.lastSphereCount}`);
     }
 
     public getAllBuffers(): {
@@ -546,14 +555,9 @@ export class BufferManager {
             sceneConfig: this.sceneConfigBuffer,
         };
 
-        // BVH-Buffers IMMER hinzufügen (auch wenn disabled)
-        // Shader braucht sie gebunden um zwischen BVH und linearem Search zu entscheiden!
         if (this.bvhNodesBuffer && this.bvhSphereIndicesBuffer) {
             buffers.bvhNodes = this.bvhNodesBuffer;
             buffers.bvhSphereIndices = this.bvhSphereIndicesBuffer;
-            console.log(`✅ BVH-Buffers gebunden (enabled: ${this.bvhEnabled})`);
-        } else {
-            console.log(`❌ BVH-Buffers nicht verfügbar - Schatten funktionieren möglicherweise nicht!`);
         }
 
         return buffers;

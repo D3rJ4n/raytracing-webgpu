@@ -225,17 +225,17 @@ fn randomFloat2(seed: ptr<function, u32>) -> vec2<f32> {
 fn getCameraRay(uv: vec2<f32>) -> vec3<f32> {
     let aspectRatio = f32(renderInfo.width) / f32(renderInfo.height);
     let fov = 1.0472;
-    
+
     let forward = normalize(camera.lookAt - camera.position);
-    let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), forward));
-    let up = cross(forward, right);
-    
+    let right = normalize(cross(forward, vec3<f32>(0.0, 1.0, 0.0)));
+    let up = cross(right, forward);
+
     let halfHeight = tan(fov * 0.5);
     let halfWidth = halfHeight * aspectRatio;
-    
+
     let x = (uv.x * 2.0 - 1.0) * halfWidth;
-    let y = -(uv.y * 2.0 - 1.0) * halfHeight; 
-    
+    let y = -(uv.y * 2.0 - 1.0) * halfHeight;
+
     return normalize(forward + x * right + y * up);
 }
 

@@ -16,16 +16,13 @@ export class MovementTracker {
     private lastSpherePositions: Map<number, SpherePosition> = new Map();
     private lastSphereRadii: Map<number, number> = new Map();
     private lastCameraData: Float32Array | null = null;
-    private sphereMovementThreshold: number = 0.00001; // Sehr sensitiv für Animation!
+    private sphereMovementThreshold: number = 0.00001;
     private cameraMovementThreshold: number = 0.001;
 
     constructor() {
         this.logger = Logger.getInstance();
     }
 
-    /**
-     * Kamera-Daten aktualisieren und Änderung erkennen
-     */
     public updateCameraData(cameraData: Float32Array): boolean {
         if (!this.lastCameraData) {
             this.lastCameraData = new Float32Array(cameraData);
@@ -44,9 +41,6 @@ export class MovementTracker {
         return changed;
     }
 
-    /**
-     * Sphere-Daten aktualisieren und bewegte Spheres erkennen
-     */
     public updateSpheresData(spheresData: Float32Array): number[] {
         const movedSpheres: number[] = [];
         const sphereCount = Math.floor(spheresData.length / 8);
@@ -72,15 +66,13 @@ export class MovementTracker {
         return movedSpheres;
     }
 
-    /**
-     * Sphere-Daten (Position + Radius) aus Float32Array extrahieren
-     */
+    public getOldPositions(): Map<number, SpherePosition> {
+        return new Map(this.lastSpherePositions);
+    }
+
     private extractSphereData(spheresData: Float32Array, sphereIndex: number): SphereData | null {
         const offset = sphereIndex * 8;
-
-        if (offset + 3 >= spheresData.length) {
-            return null;
-        }
+        if (offset + 3 >= spheresData.length) return null;
 
         return {
             position: {
@@ -92,9 +84,6 @@ export class MovementTracker {
         };
     }
 
-    /**
-     * Prüfen ob sich Sphere signifikant bewegt hat
-     */
     private hasSphereMovedSignificantly(oldPos: SpherePosition, newPos: SpherePosition): boolean {
         const distance = Math.sqrt(
             Math.pow(oldPos.x - newPos.x, 2) +
@@ -104,35 +93,22 @@ export class MovementTracker {
         return distance > this.sphereMovementThreshold;
     }
 
-    /**
-     * Letzte Position einer Sphere abrufen
-     */
     public getLastPosition(sphereIndex: number): SpherePosition | undefined {
         return this.lastSpherePositions.get(sphereIndex);
     }
 
-    /**
-     * Alle getrackte Positionen löschen
-     */
     public clearAllPositions(): void {
         this.lastSpherePositions.clear();
         this.lastSphereRadii.clear();
     }
 
-    /**
-     * Stats zurücksetzen
-     */
     public reset(): void {
         this.lastSpherePositions.clear();
         this.lastSphereRadii.clear();
         this.lastCameraData = null;
     }
 
-    /**
-     * Cleanup
-     */
     public cleanup(): void {
         this.reset();
-        this.logger.cache('MovementTracker aufgeräumt');
     }
 }

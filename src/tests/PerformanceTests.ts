@@ -447,10 +447,10 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         // Detailstatistiken
         console.log('📊 DETAILSTATISTIKEN:');
         console.log('────────────────────────────────────────────────────────────────────────────────');
-        console.log(`Ohne BVH, Ohne Cache:  Min: ${results.noBvhNoCache.min.toFixed(2)}ms (${(1000/results.noBvhNoCache.min).toFixed(1)} FPS), Max: ${results.noBvhNoCache.max.toFixed(2)}ms (${(1000/results.noBvhNoCache.max).toFixed(1)} FPS)`);
-        console.log(`Mit BVH, Ohne Cache:   Min: ${results.bvhNoCache.min.toFixed(2)}ms (${(1000/results.bvhNoCache.min).toFixed(1)} FPS), Max: ${results.bvhNoCache.max.toFixed(2)}ms (${(1000/results.bvhNoCache.max).toFixed(1)} FPS)`);
-        console.log(`Ohne BVH, Mit Cache:   Min: ${results.noBvhCache.min.toFixed(2)}ms (${(1000/results.noBvhCache.min).toFixed(1)} FPS), Max: ${results.noBvhCache.max.toFixed(2)}ms (${(1000/results.noBvhCache.max).toFixed(1)} FPS)`);
-        console.log(`Mit BVH + Cache:       Min: ${results.bvhCache.min.toFixed(2)}ms (${(1000/results.bvhCache.min).toFixed(1)} FPS), Max: ${results.bvhCache.max.toFixed(2)}ms (${(1000/results.bvhCache.max).toFixed(1)} FPS)`);
+        console.log(`Ohne BVH, Ohne Cache:  Min: ${results.noBvhNoCache.min.toFixed(2)}ms (${(1000 / results.noBvhNoCache.min).toFixed(1)} FPS), Max: ${results.noBvhNoCache.max.toFixed(2)}ms (${(1000 / results.noBvhNoCache.max).toFixed(1)} FPS)`);
+        console.log(`Mit BVH, Ohne Cache:   Min: ${results.bvhNoCache.min.toFixed(2)}ms (${(1000 / results.bvhNoCache.min).toFixed(1)} FPS), Max: ${results.bvhNoCache.max.toFixed(2)}ms (${(1000 / results.bvhNoCache.max).toFixed(1)} FPS)`);
+        console.log(`Ohne BVH, Mit Cache:   Min: ${results.noBvhCache.min.toFixed(2)}ms (${(1000 / results.noBvhCache.min).toFixed(1)} FPS), Max: ${results.noBvhCache.max.toFixed(2)}ms (${(1000 / results.noBvhCache.max).toFixed(1)} FPS)`);
+        console.log(`Mit BVH + Cache:       Min: ${results.bvhCache.min.toFixed(2)}ms (${(1000 / results.bvhCache.min).toFixed(1)} FPS), Max: ${results.bvhCache.max.toFixed(2)}ms (${(1000 / results.bvhCache.max).toFixed(1)} FPS)`);
         console.log('────────────────────────────────────────────────────────────────────────────────\n');
 
         return results;
@@ -487,7 +487,7 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
         console.log('║  Cache wird vor JEDEM Frame resettet (reines BVH-Testing)        ║');
         console.log('╚════════════════════════════════════════════════════════════════════╝\n');
 
-        const startSpheres = 500;
+        const startSpheres = 200;
         const sphereIncrement = 50;
         const iterations = 10;
         const framesPerIteration = 100;
@@ -502,15 +502,16 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
 
         // BVH aktivieren
         app.bufferManager.setBVHEnabled(true);
+        app.resetCache();
         console.log('✅ BVH aktiviert\n');
 
         for (let iter = 0; iter < iterations; iter++) {
             const sphereCount = startSpheres + (iter * sphereIncrement);
             console.log(`\n🔧 Iteration ${iter + 1}/${iterations}: ${sphereCount} Kugeln`);
-
+            app.resetCache();
             // Szene mit neuer Kugel-Anzahl erstellen
             app.scene.createDynamicSphereScene(sphereCount);
-            app.resetCache();
+
 
             // ⚡ DEBUG: Verifiziere dass BVH aktiviert ist und korrekte Sphere-Count
             const actualSphereCount = app.scene.getSphereCount();
@@ -561,10 +562,10 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
 
         // Zusammenfassung
         console.log('\n╔═════════════════════════════════════════════════════════════════╗');
-        console.log('║                   BVH SKALIERUNGS-ZUSAMMENFASSUNG               ║');
-        console.log('╠═════════════════════════════════════════════════════════════════╣');
-        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time    ║');
-        console.log('║──────────┼────────────┼───────────┼────────────┼──────────────║');
+        console.log('║                   BVH SKALIERUNGS-ZUSAMMENFASSUNG                 ║');
+        console.log('╠═══════════════════════════════════════════════════════════════════╣');
+        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time        ║');
+        console.log('║──────────┼────────────┼───────────┼────────────┼──────────────────║');
 
         results.forEach((result) => {
             const spheres = result.sphereCount.toString().padStart(6);
@@ -576,7 +577,7 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
             console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms    ║`);
         });
 
-        console.log('╚═════════════════════════════════════════════════════════════════╝\n');
+        console.log('╚════════════════════════════════════════════════════════════════════╝\n');
 
         // Komplexitäts-Analyse
         const firstResult = results[0];
@@ -600,6 +601,141 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
             console.log('\n⚠️ WARNUNG: Annähernd linear (BVH-Vorteil nicht optimal)');
         } else {
             console.log('\n❌ PROBLEM: Schlechter als linear (BVH möglicherweise defekt)');
+        }
+
+        console.log('────────────────────────────────────────────────────────────────────────\n');
+
+        return results;
+    };
+
+    // ===== CACHE SKALIERUNGS-TEST: MIT CACHE =====
+    (window as any).testCacheScaling = async () => {
+        console.log('\n╔════════════════════════════════════════════════════════════════════╗');
+        console.log('║  CACHE SKALIERUNGS-TEST (MIT CACHE)                                ║');
+        console.log('║  Start: 200 Kugeln, +50 pro Durchgang, 10 Durchgänge             ║');
+        console.log('║  Je 100 Render-Durchläufe pro Kugel-Anzahl                       ║');
+        console.log('║  Statische Szene - Cache bleibt aktiv (reines Cache-Testing)     ║');
+        console.log('║  Cache wird NUR bei neuer Kugelanzahl resettet                   ║');
+        console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+
+        const startSpheres = 200;
+        const sphereIncrement = 50;
+        const iterations = 10;
+        const framesPerIteration = 100;
+        const warmupFrames = 3;
+
+        const results: Array<{
+            sphereCount: number;
+            avgTime: number;
+            minTime: number;
+            maxTime: number;
+            fps: number;
+        }> = [];
+
+        // BVH aktivieren (Cache nutzt auch BVH)
+        app.bufferManager.setBVHEnabled(true);
+        console.log('✅ BVH + Cache aktiviert\n');
+
+        for (let iter = 0; iter < iterations; iter++) {
+            const sphereCount = startSpheres + (iter * sphereIncrement);
+            console.log(`\n🔧 Iteration ${iter + 1}/${iterations}: ${sphereCount} Kugeln`);
+
+            // WICHTIG: Szene mit neuer Kugel-Anzahl erstellen
+            app.scene.createDynamicSphereScene(sphereCount);
+
+            // WICHTIG: Cache resetten bei neuer Kugelanzahl (Geometrie-Änderung)
+            app.resetCache();
+
+            // Verifizierung
+            const actualSphereCount = app.scene.getSphereCount();
+            const bvhEnabled = app.bufferManager.isBVHEnabled();
+            console.log(`  📊 Verifizierung: ${actualSphereCount} Spheres in Scene, BVH: ${bvhEnabled ? '✅' : '❌'}`);
+
+            // Warmup: Cache aufbauen + BVH wird hier gebaut (nicht in Messzeit!)
+            console.log(`  🔥 Warmup: Cache aufbauen (${warmupFrames} Frames, NICHT in Messzeit)...`);
+            for (let i = 0; i < warmupFrames; i++) {
+                await app.renderFrame();
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            console.log(`  ✅ Warmup abgeschlossen - Cache ist warm, BVH gebaut\n`);
+
+            // 100 Render-Durchläufe mit warmem Cache (KEINE Geometrie-Änderungen!)
+            const frameTimes: number[] = [];
+
+            for (let frame = 0; frame < framesPerIteration; frame++) {
+                // WICHTIG: Cache NICHT resetten - das ist der Cache-Test!
+                const start = performance.now();
+                await app.renderFrame();
+                const frameTime = performance.now() - start;
+                frameTimes.push(frameTime);
+
+                if (frame % 10 === 0) {
+                    console.log(`  Frame ${frame + 1}/${framesPerIteration}: ${frameTime.toFixed(2)}ms`);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            // Statistiken berechnen
+            const avgTime = frameTimes.reduce((a, b) => a + b) / frameTimes.length;
+            const minTime = Math.min(...frameTimes);
+            const maxTime = Math.max(...frameTimes);
+            const fps = 1000 / avgTime;
+
+            results.push({
+                sphereCount,
+                avgTime,
+                minTime,
+                maxTime,
+                fps
+            });
+
+            console.log(`  ✅ Durchschnitt: ${avgTime.toFixed(2)}ms (${fps.toFixed(1)} FPS)`);
+            console.log(`     Min: ${minTime.toFixed(2)}ms, Max: ${maxTime.toFixed(2)}ms`);
+
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // Zusammenfassung
+        console.log('\n╔═════════════════════════════════════════════════════════════════╗');
+        console.log('║                   CACHE SKALIERUNGS-ZUSAMMENFASSUNG               ║');
+        console.log('╠═══════════════════════════════════════════════════════════════════╣');
+        console.log('║  Kugeln  │  Avg Time  │    FPS    │  Min Time  │  Max Time        ║');
+        console.log('║──────────┼────────────┼───────────┼────────────┼──────────────────║');
+
+        results.forEach((result) => {
+            const spheres = result.sphereCount.toString().padStart(6);
+            const avg = result.avgTime.toFixed(2).padStart(8);
+            const fps = result.fps.toFixed(1).padStart(7);
+            const min = result.minTime.toFixed(2).padStart(8);
+            const max = result.maxTime.toFixed(2).padStart(8);
+
+            console.log(`║  ${spheres}  │  ${avg}ms  │  ${fps}  │  ${min}ms  │  ${max}ms    ║`);
+        });
+
+        console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+
+        // Cache-Effizienz-Analyse
+        const firstResult = results[0];
+        const lastResult = results[results.length - 1];
+        const sphereRatio = lastResult.sphereCount / firstResult.sphereCount;
+        const timeRatio = lastResult.avgTime / firstResult.avgTime;
+
+        console.log('📊 CACHE-EFFIZIENZ-ANALYSE:');
+        console.log('────────────────────────────────────────────────────────────────────────');
+        console.log(`Kugeln: ${firstResult.sphereCount} → ${lastResult.sphereCount} (${sphereRatio.toFixed(2)}x mehr)`);
+        console.log(`Zeit: ${firstResult.avgTime.toFixed(2)}ms → ${lastResult.avgTime.toFixed(2)}ms (${timeRatio.toFixed(2)}x Faktor)`);
+        console.log(`Erwartung: ~1.0x (Cache sollte Performance konstant halten)`);
+
+        if (timeRatio < 1.2) {
+            console.log('\n🚀 EXZELLENT: Performance nahezu konstant! (Cache funktioniert perfekt)');
+            console.log('   Bei statischer Szene ist die Kugel-Anzahl irrelevant - Cache macht alles!');
+        } else if (timeRatio < 1.5) {
+            console.log('\n✅ SEHR GUT: Minimale Performance-Degradierung trotz mehr Kugeln');
+        } else if (timeRatio < 2.0) {
+            console.log('\n⚠️ OK: Moderater Performance-Verlust bei mehr Kugeln');
+        } else {
+            console.log('\n❌ PROBLEM: Signifikanter Performance-Verlust (Cache möglicherweise ineffizient)');
         }
 
         console.log('────────────────────────────────────────────────────────────────────────\n');
@@ -1113,4 +1249,24 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
 
         return allResults;
     };
+
+    // ===== HAUPTÜBERSICHT: ALLE VERFÜGBAREN TESTS =====
+    console.log('\n╔═══════════════════════════════════════════════════════════════════════╗');
+    console.log('║                    VERFÜGBARE PERFORMANCE-TESTS                       ║');
+    console.log('╠═══════════════════════════════════════════════════════════════════════╣');
+    console.log('║  📊 SKALIERUNGS-TESTS (Sphere-Anzahl vs. Performance):               ║');
+    console.log('║     • testLinearScaling()  - Linearer Rendering-Test (ohne BVH)      ║');
+    console.log('║     • testBVHScaling()     - BVH-Skalierungstest (mit BVH)           ║');
+    console.log('║     • testCacheScaling()   - Cache-Effizienztest (statisch)          ║');
+    console.log('║                                                                       ║');
+    console.log('║  🎯 CACHE-TESTS (Einzelne Features):                                 ║');
+    console.log('║     • testStaticScene()    - Cache-Effektivität (statisch)           ║');
+    console.log('║     • testSingleSphere()   - Single-Sphere Bewegung                  ║');
+    console.log('║     • testSelectiveVsFull()- Selektive vs. Komplette Invalidierung   ║');
+    console.log('║     • testCameraMovement() - Kamera-Bewegung Cache-Impact            ║');
+    console.log('║                                                                       ║');
+    console.log('║  🔬 KOMPLETTE SUITE:                                                  ║');
+    console.log('║     • testAllScenarios()   - Alle Szenarien (12 Tests)               ║');
+    console.log('║     • runAllTests()        - Alle Cache-Tests nacheinander           ║');
+    console.log('╚═══════════════════════════════════════════════════════════════════════╝\n');
 }

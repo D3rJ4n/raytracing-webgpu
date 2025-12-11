@@ -51,8 +51,7 @@ export class Scene {
         this.createCamera();
         this.createGround();
 
-        // 500 Kugeln Grid erstellen
-        this.setup500SphereGrid();
+        this.setupRandomSpheres();
 
         this.logSceneInfo();
         this.logger.success('Three.js Szene erstellt');
@@ -91,90 +90,61 @@ export class Scene {
         this.logger.init(`Ground-Plane erstellt: Y=${this.groundMesh.position.y}, Größe=${groundSize}x${groundSize}`);
     }
 
-    /**
-     * Erstelle 500 Kugeln Grid (25x20)
-     */
-    /**
-  * Erstelle massive BVH-Test-Szene (korrigierte Version)
-  */
-    private setup500SphereGrid(): void {
+    private setupRandomSpheres(): void {
         this.clearSpheres();
-        this.logger.init('Erstelle massive BVH-Test-Szene...');
+        this.logger.init('Erstelle Test-Kugeln im sichtbaren Frustum...');
 
-        const SPHERE_COUNT = 400;
-        const WORLD_SIZE = 50;
-        let validSpheres = 0;
-        let invalidSpheres = 0;
+        // Kamera-Setup
+        this.camera.position.set(0, 20, 50);
+        this.camera.lookAt(0, 10, 0);
+        this.camera.updateProjectionMatrix();
 
-        // Debug: Math.random() testen
-        console.log('Math.random() test:', Math.random(), Math.random(), Math.random());
+        // Größerer Verteilungsbereich
+        const worldSize = 30;
+        //X: ±7.5 (worldSize = 15)
+        //Y: 2 bis 18 (minY = 2, maxY = 18)
+        //Z: -15 bis 15 (minZ = -15, maxZ = 15)
+        const minY = 2;
+        const maxY = 18;
+        const minZ = -15;
+        const maxZ = 15;
 
-        for (let i = 0; i < SPHERE_COUNT; i++) {
-            // Schritt-für-Schritt Validierung
-            const randomX = Math.random();
-            const randomY = Math.random();
-            const randomZ = Math.random();
+        for (let i = 0; i < 200; i++) {
+            const color = new THREE.Color();
+            color.setHSL(i / 10, 0.7, 0.6);
 
-            if (!isFinite(randomX) || !isFinite(randomY) || !isFinite(randomZ)) {
-                console.error(`Math.random() defekt bei ${i}: ${randomX}, ${randomY}, ${randomZ}`);
-                invalidSpheres++;
-                continue;
-            }
-
-            const x = (randomX - 0.5) * WORLD_SIZE;
-            const y = randomY * 20 + 2; // 2 bis 22
-            const z = (randomZ - 0.5) * WORLD_SIZE;
-
-            if (!isFinite(x) || !isFinite(y) || !isFinite(z)) {
-                console.error(`Position-Berechnung defekt bei ${i}: ${x}, ${y}, ${z}`);
-                invalidSpheres++;
-                continue;
-            }
-
-            // Sphere erstellen mit Validierung
-            const radius = 0.3 + Math.random() * 0.4;
-            const hue = i / SPHERE_COUNT;
+            const x = (Math.random() - 0.5) * worldSize;
+            const y = minY + Math.random() * (maxY - minY);
+            const z = minZ + Math.random() * (maxZ - minZ);
+            const radius = 0.3 + Math.random() * 0.5; // 0.3 bis 0.8
 
             const sphere = new THREE.Mesh(
-                new THREE.SphereGeometry(radius, 12, 12),
+                new THREE.SphereGeometry(radius, 32, 32),
                 new THREE.MeshStandardMaterial({
-                    color: new THREE.Color().setHSL(hue, 0.8, 0.6),
-                    metalness: Math.random() > 0.8 ? 0.9 : 0.1,
-                    roughness: 0.3 + Math.random() * 0.4
+                    color: color,
+                    metalness: 0.3,
+                    roughness: 0.4
                 })
             );
 
             sphere.position.set(x, y, z);
-            sphere.name = `MassiveSphere_${validSpheres}`;
+            sphere.name = `TestSphere_${i}`;
             sphere.userData.originalPosition = { x, y, z };
 
             this.scene.add(sphere);
             this.meshes.push(sphere);
-            validSpheres++;
-
-            if (i % 200 === 0) {
-                console.log(`${i}/${SPHERE_COUNT} versucht, ${validSpheres} erstellt`);
-            }
         }
 
-        // Beleuchtung und Kamera-Setup...
-        const mainLight = new THREE.PointLight(0xffffff, 2.0, WORLD_SIZE * 2);
-        mainLight.position.set(0, WORLD_SIZE * 0.6, 0);
+        const mainLight = new THREE.PointLight(0xffffff, 2.0, 100);
+        mainLight.position.set(10, 40, 10);
         this.scene.add(mainLight);
         this.lights.push(mainLight);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
         this.scene.add(ambientLight);
         this.lights.push(ambientLight);
 
-        // Kamera für kompaktere Szene
-        this.camera.position.set(0, 30, 40);
-        this.camera.lookAt(0, 10, 0);
-        this.camera.fov = 75;
-        this.camera.far = 300;
-        this.camera.updateProjectionMatrix();
-
-        this.logger.success(`${this.meshes.length} Spheres über ${WORLD_SIZE}x${WORLD_SIZE} erstellt`);
+        this.logger.success(`150 Kugeln erstellt (X: ±${(worldSize / 2).toFixed(1)}, Y: ${minY}-${maxY}, Z: ${minZ}-${maxZ})`);
     }
 
     // ===== ANIMATION METHODS =====
@@ -414,6 +384,43 @@ export class Scene {
         }
 
         this.logger.success(`${sphereCount} Kugeln für Performance-Test erstellt`);
+    }
+
+    /**
+     * Fügt zusätzliche Kugeln zur bestehenden Szene hinzu (ohne die alten zu verändern)
+     * Ideal für inkrementelle Cache-Tests
+     */
+    public addMoreSpheres(additionalCount: number): void {
+        const WORLD_SIZE = 50;
+        const currentCount = this.meshes.length;
+
+        for (let i = 0; i < additionalCount; i++) {
+            const x = (Math.random() - 0.5) * WORLD_SIZE;
+            const y = Math.random() * 20 + 2; // 2 bis 22
+            const z = (Math.random() - 0.5) * WORLD_SIZE;
+
+            const radius = 0.3 + Math.random() * 0.4;
+            const totalSpheres = currentCount + additionalCount;
+            const hue = (currentCount + i) / totalSpheres;
+
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 12, 12),
+                new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(hue, 0.8, 0.6),
+                    metalness: Math.random() > 0.8 ? 0.9 : 0.1,
+                    roughness: 0.3 + Math.random() * 0.4
+                })
+            );
+
+            sphere.position.set(x, y, z);
+            sphere.name = `DynamicSphere_${currentCount + i}`;
+            sphere.userData.originalPosition = { x, y, z };
+
+            this.scene.add(sphere);
+            this.meshes.push(sphere);
+        }
+
+        this.logger.success(`${additionalCount} zusätzliche Kugeln hinzugefügt (gesamt: ${this.meshes.length})`);
     }
 
     public clearSpheres(): void {
