@@ -125,7 +125,7 @@ export class ScreenProjection {
         // Sphere-Center projizieren
         const screenCenterX = (cameraSpacePos.x / depth / cache.halfWidth + 1.0) * 0.5 * this.canvasWidth;
         const screenCenterY = (-cameraSpacePos.y / depth / cache.halfHeight + 1.0) * 0.5 * this.canvasHeight;
-        const screenRadius = (radius / depth) / cache.halfHeight * (this.canvasHeight * 0.5);
+        const screenRadius = (radius / depth) * (cache.halfHeight * this.canvasHeight * 0.5);
 
         return {
             minX: Math.max(0, Math.floor(screenCenterX - screenRadius)),
@@ -170,7 +170,7 @@ export class ScreenProjection {
         });
 
         const worldUp = { x: 0, y: 1, z: 0 };
-        cache.right = this.normalize(this.cross(cache.forward, worldUp));
+        cache.right = this.normalize(this.cross(worldUp, cache.forward));
         cache.up = this.cross(cache.forward, cache.right);
 
         // Frustum Dimensionen
@@ -237,104 +237,6 @@ export class ScreenProjection {
     }
 
     /**
-     * Sphere zu Bildschirm-Bounding-Box mit automatischem Padding
-     * (für Invalidierung - berücksichtigt dass Kugeln am Rand abgeschnitten werden)
-     */
-    public sphereToScreenBoundsWithPadding(position: Vector3D, radius: number, padding: number): ScreenBounds {
-        if (!this.currentCamera) {
-            return {
-                minX: 0,
-                minY: 0,
-                maxX: this.canvasWidth - 1,
-                maxY: this.canvasHeight - 1
-            };
-        }
-
-        const sphereInCameraSpace = this.worldToCameraSpace(position);
-
-        // Frustum Culling - nur wenn KOMPLETT hinter Kamera
-        if (sphereInCameraSpace.z + radius < 0.1) {
-            return this.emptyBounds();
-        }
-        if (sphereInCameraSpace.z - radius > 1000) {
-            return this.emptyBounds();
-        }
-
-        // Konservativ bei nahen Spheres
-        if (sphereInCameraSpace.z - radius < 0.1) {
-            return this.conservativeBounds(sphereInCameraSpace, radius);
-        }
-
-        const cache = this.projectionMatrixCache;
-        const depth = sphereInCameraSpace.z;
-
-        // Sphere-Center projizieren
-        const screenCenterX = (sphereInCameraSpace.x / depth / cache.halfWidth + 1.0) * 0.5 * this.canvasWidth;
-        const screenCenterY = (-sphereInCameraSpace.y / depth / cache.halfHeight + 1.0) * 0.5 * this.canvasHeight;
-        const screenRadius = (radius / depth) / cache.halfHeight * (this.canvasHeight * 0.5);
-
-        // Berechne Bounds MIT Padding OHNE Clamping
-        const unclampedMinX = Math.floor(screenCenterX - screenRadius - padding);
-        const unclampedMinY = Math.floor(screenCenterY - screenRadius - padding);
-        const unclampedMaxX = Math.ceil(screenCenterX + screenRadius + padding);
-        const unclampedMaxY = Math.ceil(screenCenterY + screenRadius + padding);
-
-        // Prüfe ob Kugel teilweise außerhalb des Bildschirms ist
-        const isPartiallyOffscreen =
-            unclampedMinX < 0 || unclampedMinY < 0 ||
-            unclampedMaxX >= this.canvasWidth || unclampedMaxY >= this.canvasHeight;
-
-        // Prüfe ob Kugel KOMPLETT außerhalb des Frustums ist (für Ghost-Sphere-Fix)
-        const isCompletelyOutsideFrustum =
-            unclampedMaxX < 0 || unclampedMinX >= this.canvasWidth ||
-            unclampedMaxY < 0 || unclampedMinY >= this.canvasHeight;
-
-        // WICHTIG: Wenn Kugel KOMPLETT außerhalb ist, gebe trotzdem Bounds zurück
-        // für Invalidierung (verhindert Ghost-Spheres)
-        if (isCompletelyOutsideFrustum) {
-            // Berechne wo die Kugel WÄR wenn sie sichtbar wäre
-            // und gebe einen kleinen Rand-Bereich zurück
-            const clampedBounds = {
-                minX: Math.max(0, Math.min(this.canvasWidth - 1, unclampedMinX)),
-                minY: Math.max(0, Math.min(this.canvasHeight - 1, unclampedMinY)),
-                maxX: Math.max(0, Math.min(this.canvasWidth - 1, unclampedMaxX)),
-                maxY: Math.max(0, Math.min(this.canvasHeight - 1, unclampedMaxY))
-            };
-
-            // Wenn nach Clamping keine gültigen Bounds mehr übrig sind
-            if (clampedBounds.maxX < clampedBounds.minX || clampedBounds.maxY < clampedBounds.minY) {
-                // Gebe einen kleinen Rand-Bereich zurück basierend auf der Richtung
-                if (unclampedMaxX < 0) {
-                    // Links außerhalb
-                    return { minX: 0, minY: 0, maxX: Math.min(50, this.canvasWidth - 1), maxY: this.canvasHeight - 1 };
-                } else if (unclampedMinX >= this.canvasWidth) {
-                    // Rechts außerhalb
-                    return { minX: Math.max(0, this.canvasWidth - 50), minY: 0, maxX: this.canvasWidth - 1, maxY: this.canvasHeight - 1 };
-                } else if (unclampedMaxY < 0) {
-                    // Oben außerhalb
-                    return { minX: 0, minY: 0, maxX: this.canvasWidth - 1, maxY: Math.min(50, this.canvasHeight - 1) };
-                } else {
-                    // Unten außerhalb
-                    return { minX: 0, minY: Math.max(0, this.canvasHeight - 50), maxX: this.canvasWidth - 1, maxY: this.canvasHeight - 1 };
-                }
-            }
-            return clampedBounds;
-        }
-
-        // WICHTIG: Wenn Kugel teilweise offscreen ist, erweitere Padding!
-        // Dies verhindert Ghost-Spheres wenn Kugeln den Bildschirm verlassen
-        const effectivePadding = isPartiallyOffscreen ? padding * 2.0 : padding;
-
-        // Jetzt mit erweitertem Padding und Clamping
-        return {
-            minX: Math.max(0, Math.floor(screenCenterX - screenRadius - effectivePadding)),
-            minY: Math.max(0, Math.floor(screenCenterY - screenRadius - effectivePadding)),
-            maxX: Math.min(this.canvasWidth - 1, Math.ceil(screenCenterX + screenRadius + effectivePadding)),
-            maxY: Math.min(this.canvasHeight - 1, Math.ceil(screenCenterY + screenRadius + effectivePadding))
-        };
-    }
-
-    /**
      * Mehrere Bounds vereinigen
      */
     public unionMultipleBounds(boundsArray: ScreenBounds[]): ScreenBounds {
@@ -372,7 +274,7 @@ export class ScreenProjection {
         const cameraSpacePos = this.worldToCameraSpace(position);
         const bounds = this.sphereToScreenBounds(position, radius);
         const projectedRadius = cameraSpacePos.z > 0.1 ?
-            (radius / cameraSpacePos.z) / this.projectionMatrixCache.halfHeight * (this.canvasHeight * 0.5) : 0;
+            (radius / cameraSpacePos.z) * (this.projectionMatrixCache.halfHeight * this.canvasHeight * 0.5) : 0;
 
         return {
             cameraSpacePosition: cameraSpacePos,

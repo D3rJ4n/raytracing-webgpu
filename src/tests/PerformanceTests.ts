@@ -985,8 +985,8 @@ export function setupPerformanceTests(app: WebGPURaytracerApp): void {
 
         // Funktion zum Verschieben von 2 Kugeln
         const moveTwoSpheres = () => {
-            const sphere0 = app.scene.getThreeScene().children.find(obj => obj.name.includes('MassiveSphere_0'));
-            const sphere1 = app.scene.getThreeScene().children.find(obj => obj.name.includes('MassiveSphere_1'));
+            const sphere0 = app.scene.getThreeScene().children.find(obj => obj.name.includes('TestSphere_0'));
+            const sphere1 = app.scene.getThreeScene().children.find(obj => obj.name.includes('TestSphere_1'));
             if (sphere0) {
                 sphere0.position.x += 1.0;
                 console.log('✅ Sphere 0 verschoben zu x=' + sphere0.position.x);

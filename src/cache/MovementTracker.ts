@@ -52,8 +52,14 @@ export class MovementTracker {
                 const lastPosition = this.lastSpherePositions.get(i);
                 const lastRadius = this.lastSphereRadii.get(i);
 
+                // Debug: Log erste Sphere
+                // if (i === 0) {
+                //     console.log(`🔍 MovementTracker Sphere 0: current.y=${currentData.position.y.toFixed(3)}, last.y=${lastPosition?.y.toFixed(3) || 'null'}`);
+                // }
+
                 if (lastPosition && this.hasSphereMovedSignificantly(lastPosition, currentData.position)) {
                     movedSpheres.push(i);
+                    // if (i === 0) console.log(`✅ Sphere 0 als MOVED erkannt!`);
                 } else if (lastRadius !== undefined && Math.abs(lastRadius - currentData.radius) > 0.001) {
                     movedSpheres.push(i);
                 }
@@ -63,6 +69,7 @@ export class MovementTracker {
             }
         }
 
+        // console.log(`🔍 MovementTracker: ${movedSpheres.length} Spheres moved:`, movedSpheres);
         return movedSpheres;
     }
 
@@ -90,6 +97,12 @@ export class MovementTracker {
             Math.pow(oldPos.y - newPos.y, 2) +
             Math.pow(oldPos.z - newPos.z, 2)
         );
+
+        // Debug: Log für Sphere 0
+        // if (Math.abs(oldPos.y - newPos.y) < 0.01) {
+        //     console.log(`🔍 Distance Check: distance=${distance.toFixed(8)}, threshold=${this.sphereMovementThreshold}, moved=${distance > this.sphereMovementThreshold}`);
+        // }
+
         return distance > this.sphereMovementThreshold;
     }
 
@@ -110,5 +123,6 @@ export class MovementTracker {
 
     public cleanup(): void {
         this.reset();
+        this.logger.cache('MovementTracker aufgeräumt');
     }
 }

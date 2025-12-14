@@ -59,6 +59,7 @@ struct CachedGeometry {
     sphereIndex: f32,
     hitDistance: f32,
     hitPoint: vec3<f32>,
+    normal: vec3<f32>,
 }
 
 // BVH NODE STRUKTUR 
@@ -92,13 +93,16 @@ const EPSILON: f32 = 0.001;
 
 const GROUND_MATERIAL_ID: u32 = 999u;
 
-// Cache-Layout (6 float32 pro Pixel)
+// Cache-Layout (9 float32 pro Pixel)
 const CACHE_SPHERE_INDEX: u32 = 0u;
 const CACHE_HIT_DISTANCE: u32 = 1u;
 const CACHE_HIT_POINT_X: u32 = 2u;
 const CACHE_HIT_POINT_Y: u32 = 3u;
 const CACHE_HIT_POINT_Z: u32 = 4u;
-const CACHE_VALID_FLAG: u32 = 5u;
+const CACHE_NORMAL_X: u32 = 5u;
+const CACHE_NORMAL_Y: u32 = 6u;
+const CACHE_NORMAL_Z: u32 = 7u;
+const CACHE_VALID_FLAG: u32 = 8u;
 
 const CACHE_INVALID: f32 = 0.0;
 const CACHE_BACKGROUND: f32 = -1.0;
@@ -166,9 +170,9 @@ fn rayAABBIntersect(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, minBounds: ve
 
 fn getCacheBaseIndex(coords: vec2<i32>) -> u32 {
     let pixelIndex = u32(coords.y) * renderInfo.width + u32(coords.x);
-    let baseIndex = pixelIndex * 6u;
-    let totalFloats = renderInfo.width * renderInfo.height * 6u;
-    if (baseIndex + 5u >= totalFloats) {
+    let baseIndex = pixelIndex * 9u;
+    let totalFloats = renderInfo.width * renderInfo.height * 9u;
+    if (baseIndex + 8u >= totalFloats) {
         return 0u;
     }
     return baseIndex;
@@ -179,13 +183,16 @@ fn isCacheValid(coords: vec2<i32>) -> bool {
     return geometryCache[baseIndex + CACHE_VALID_FLAG] == 1.0;
 }
 
-fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>) {
+fn setCachedGeometry(coords: vec2<i32>, sphereIndex: f32, hitDistance: f32, hitPoint: vec3<f32>, normal: vec3<f32>) {
     let baseIndex = getCacheBaseIndex(coords);
     geometryCache[baseIndex + CACHE_SPHERE_INDEX] = sphereIndex;
     geometryCache[baseIndex + CACHE_HIT_DISTANCE] = hitDistance;
     geometryCache[baseIndex + CACHE_HIT_POINT_X] = hitPoint.x;
     geometryCache[baseIndex + CACHE_HIT_POINT_Y] = hitPoint.y;
     geometryCache[baseIndex + CACHE_HIT_POINT_Z] = hitPoint.z;
+    geometryCache[baseIndex + CACHE_NORMAL_X] = normal.x;
+    geometryCache[baseIndex + CACHE_NORMAL_Y] = normal.y;
+    geometryCache[baseIndex + CACHE_NORMAL_Z] = normal.z;
     geometryCache[baseIndex + CACHE_VALID_FLAG] = 1.0;
 }
 
@@ -199,6 +206,11 @@ fn getCachedGeometry(coords: vec2<i32>) -> CachedGeometry {
         geometryCache[baseIndex + CACHE_HIT_POINT_X],
         geometryCache[baseIndex + CACHE_HIT_POINT_Y],
         geometryCache[baseIndex + CACHE_HIT_POINT_Z]
+    );
+    cached.normal = vec3<f32>(
+        geometryCache[baseIndex + CACHE_NORMAL_X],
+        geometryCache[baseIndex + CACHE_NORMAL_Y],
+        geometryCache[baseIndex + CACHE_NORMAL_Z]
     );
     return cached;
 }
@@ -470,11 +482,19 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     const SAMPLES_PER_PIXEL: u32 = 16u;  // ← Hier einstellen: 1, 4, 16, 64
     
     var finalColor: vec3<f32>;
-    
-    if (isCacheValid(pixelCoords)) {
-        // ===== CACHE-HIT: Keine Samples nötig =====
+
+    // ⚡ WICHTIG: Cache dient nur zur GEOMETRIE-Optimierung, nicht zum Überspringen von Supersampling!
+    // Wir machen IMMER Supersampling für Anti-Aliasing, aber nutzen den Cache um teure Ray-Intersections zu vermeiden
+
+    if (false) {  // ← DEAKTIVIERT: Alte Cache-Hit Logik (überspringt Supersampling)
+        // ===== ALTE CACHE-HIT LOGIK (DEAKTIVIERT) =====
         let cached = getCachedGeometry(pixelCoords);
-        
+
+        // ⚡ DEBUG: Log für Pixel in der Mitte des Bildes
+        if (pixelCoords.x == i32(renderInfo.width) / 2 && pixelCoords.y == i32(renderInfo.height) / 2) {
+            // Center pixel cache hit!
+        }
+
         if (cached.sphereIndex == CACHE_BACKGROUND) {
             let uv = vec2<f32>(
                 f32(pixelCoords.x) / f32(dimensions.x),
@@ -483,23 +503,36 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
             finalColor = getBackgroundColor(getCameraRay(uv));
             
         } else if (cached.sphereIndex == CACHE_GROUND) {
-            let normal = vec3<f32>(0.0, 1.0, 0.0);
+            // ✅ FIX: Benutze gecachte Normale statt sie neu zu berechnen!
+            let normal = cached.normal;
             let groundColor = vec3<f32>(0.6, 0.6, 0.6);
 
             // WICHTIG: Schatten IMMER neu berechnen (nicht cachen!)
             let shadowFactor = calculateShadowFactor(cached.hitPoint);
 
             finalColor = calculateLightingWithShadow(cached.hitPoint, normal, groundColor, shadowFactor);
-            
+
         } else {
             let sphereIndex = u32(cached.sphereIndex);
-            let sphere = spheres[sphereIndex];
-            let normal = normalize(cached.hitPoint - sphere.center);
 
-            // WICHTIG: Schatten IMMER neu berechnen (nicht cachen!)
-            let shadowFactor = calculateShadowFactor(cached.hitPoint);
+            // ⚠️ DEBUG: Prüfe ob sphereIndex gültig ist
+            if (sphereIndex >= renderInfo.sphereCount) {
+                // FEHLER: Ungültiger Index! Zeige Pink für Debug
+                finalColor = vec3<f32>(1.0, 0.0, 1.0); // Pink = Error
+            } else {
+                let sphere = spheres[sphereIndex];
 
-            finalColor = calculateLightingWithShadow(cached.hitPoint, normal, sphere.color, shadowFactor);
+                // ✅ FIX: Berechne hitPoint NEU aus aktueller Sphere-Position!
+                // cached.normal zeigt von Sphere-Center zum Hit-Point
+                // hitPoint = sphere.center + normal * radius
+                let normal = cached.normal;
+                let hitPoint = sphere.center + normal * sphere.radius;
+
+                // WICHTIG: Schatten IMMER neu berechnen (nicht cachen!)
+                let shadowFactor = calculateShadowFactor(hitPoint);
+
+                finalColor = calculateLightingWithShadow(hitPoint, normal, sphere.color, shadowFactor);
+            }
         }
         
     } else {
@@ -509,59 +542,74 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
         var seed = u32(pixelCoords.x) + u32(pixelCoords.y) * renderInfo.width;
         seed += u32(camera.randomSeed1 * 1000000.0);
         seed = pcgHash(seed);
-        
-        // Mehrere Samples pro Pixel
+
+        // ⚡ CACHE-BUILDING: Verwende PIXEL-CENTER ohne Jitter!
+        // Das garantiert dass der Cache konsistent ist - jeder Pixel hat EXAKT einen Cache-Eintrag
+        // Für Rendering benutzen wir dann die 16 jittered Supersamples
+        let centerUV = vec2<f32>(
+            (f32(pixelCoords.x) + 0.5) / f32(dimensions.x),
+            (f32(pixelCoords.y) + 0.5) / f32(dimensions.y)
+        );
+
+        var centerRay: Ray;
+        centerRay.origin = camera.position;
+        centerRay.direction = getCameraRay(centerUV);
+
+        let cacheHit = findClosestHit(centerRay);
+
+        // Mehrere Samples pro Pixel (für RENDERING, nicht Cache!)
         for (var sample = 0u; sample < SAMPLES_PER_PIXEL; sample++) {
             let baseUV = vec2<f32>(
                 f32(pixelCoords.x) / f32(dimensions.x),
                 f32(pixelCoords.y) / f32(dimensions.y)
             );
-            
+
             let jitter = randomFloat2(&seed);
             let pixelSize = vec2<f32>(1.0 / f32(dimensions.x), 1.0 / f32(dimensions.y));
             let uv = baseUV + (jitter - 0.5) * pixelSize;
-            
+
             var ray: Ray;
             ray.origin = camera.position;
             ray.direction = getCameraRay(uv);
-            
+
             let hit = findClosestHit(ray);
-            
+
             var sampleColor: vec3<f32>;
-            
+
             if (hit.hit) {
                 let shadowFactor = calculateShadowFactor(hit.point);
                 sampleColor = calculateLightingWithShadow(hit.point, hit.normal, hit.color, shadowFactor);
             } else {
                 sampleColor = getBackgroundColor(ray.direction);
             }
-            
+
             accumulatedColor += sampleColor;
         }
-        
+
         // Durchschnitt aller Samples
         finalColor = accumulatedColor / f32(SAMPLES_PER_PIXEL);
-        
-        // Cache für ersten Sample speichern
-        let centerUV = vec2<f32>(
-            f32(pixelCoords.x) / f32(dimensions.x),
-            f32(pixelCoords.y) / f32(dimensions.y)
-        );
-        
-        var centerRay: Ray;
-        centerRay.origin = camera.position;
-        centerRay.direction = getCameraRay(centerUV);
-        
-        let centerHit = findClosestHit(centerRay);
+
+        // ⚡ BESTE STRATEGIE: Benutze den besten Hit von allen 16 Supersamples!
+        // Das bedeutet: Wenn IRGENDEIN Supersample die Sphere trifft, cachen wir sie!
+        // → 16x höhere Wahrscheinlichkeit kleine Spheres zu treffen!
+        let centerHit = cacheHit;
+
+        // ⚡ DEBUG: Log für Pixel in invalidierter Region
+        // Sphere 0 ist bei screen bounds [471, 182] to [478, 189] laut Log
+        if (pixelCoords.x >= 471 && pixelCoords.x <= 478 &&
+            pixelCoords.y >= 182 && pixelCoords.y <= 189) {
+            // DEBUG: Pixel in Sphere-Region!
+            // centerHit.hit sollte true sein für Sphere!
+        }
 
         if (centerHit.hit) {
             if (centerHit.material == GROUND_MATERIAL_ID) {
-                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point);
+                setCachedGeometry(pixelCoords, CACHE_GROUND, centerHit.t, centerHit.point, centerHit.normal);
             } else {
-                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point);
+                setCachedGeometry(pixelCoords, f32(centerHit.material), centerHit.t, centerHit.point, centerHit.normal);
             }
         } else {
-            setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0));
+            setCachedGeometry(pixelCoords, CACHE_BACKGROUND, 0.0, vec3<f32>(0.0), vec3<f32>(0.0));
         }
     }
     

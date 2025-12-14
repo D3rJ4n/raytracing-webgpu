@@ -26,8 +26,7 @@ export class WebGPURaytracerApp {
     private renderPipeline: RenderPipeline;
     private renderer: Renderer;
     public pixelCache: Cache;
-    private sphereEditor: SphereEditor | null = null; // TEMPORÄR für Interaktivitäts-Test
-    private cameraController: CameraController | null = null;
+
 
     private logger: Logger;
     private initialized: boolean = false;
@@ -117,37 +116,10 @@ export class WebGPURaytracerApp {
 
             this.pixelCache.reset();
 
-            // TEMPORÄR: SphereEditor für Interaktivitäts-Test
-            this.sphereEditor = new SphereEditor(this.scene, this.canvas, async (sphereIndex: number) => {
-
-                // Auch Kamera-Daten aktualisieren (für Raycasting-Sync)
-                await this.bufferManager.updateCameraFromScene(this.scene);
-
-                // Selektive Invalidierung mit Sphere-Index
-                await this.bufferManager.updateSpheresFromScene(this.scene, {
-                    type: 'geometry',
-                    sphereIndex: sphereIndex
-                });
-
-                await this.renderFrame();
-            });
-
-            // CameraController für Kamera-Bewegung
-            this.cameraController = new CameraController(this.scene, async () => {
-                // Callback bei Kamera-Änderung → KOMPLETTE Cache-Invalidierung
-                this.pixelCache.reset();
-
-                // Kamera-Daten auf GPU aktualisieren
-                await this.bufferManager.updateCameraFromScene(this.scene);
-
-                // Frame rendern
-                await this.renderFrame();
-            });
-
             this.initialized = true;
             await this.renderFrame();
 
-            this.statusDisplay.showSuccess('WebGPU Raytracer läuft! Kamera: WASD/QE/Pfeiltasten | Kugeln: Klick+Ziehen');
+            this.statusDisplay.showSuccess('WebGPU Raytracer läuft!');
 
         } catch (error) {
             this.logger.error('Fehler bei Initialisierung:', error);
@@ -171,9 +143,24 @@ export class WebGPURaytracerApp {
 
         // Update spheres buffer with current Three.js positions
         // Jetzt mit automatischer Cache-Invalidation!
+        console.log(`\n🎬 FRAME ${this.frameCounter}: Starting buffer update...`);
         await this.bufferManager.updateSpheresFromScene(this.scene);
+        console.log(`📦 Buffer update complete`);
 
+        // ⚡ KRITISCH: Doppelter GPU-Sync für Stabilität
+        console.log(`⏳ First GPU sync...`);
+        const sync1Start = performance.now();
+        await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
+        console.log(`✅ First sync done (${(performance.now() - sync1Start).toFixed(2)}ms)`);
+
+        console.log(`⏳ Second GPU sync...`);
+        const sync2Start = performance.now();
+        await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
+        console.log(`✅ Second sync done (${(performance.now() - sync2Start).toFixed(2)}ms)`);
+
+        console.log(`🎨 Starting render...`);
         await this.renderer.renderFrame(this.canvas);
+        console.log(`✅ Render complete\n`);
         await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
 
         await this.pixelCache.readStatistics();
@@ -194,23 +181,8 @@ export class WebGPURaytracerApp {
 
     public resetCache(): void {
         this.pixelCache.reset();
+        this.bufferManager.resetSphereHash(); // ⚡ FIX: Auch Sphere-Hash resetten!
         this.frameCounter = 0;
-    }
-
-    public getCacheStats(): { missRate: number; totalPixelsInvalidated: number; averagePixelsPerInvalidation: number } | null {
-        const stats = this.bufferManager.getInvalidationStats();
-        if (!stats) return null;
-
-        const totalPixels = this.canvas.width * this.canvas.height;
-        const missRate = stats.lastPixelsInvalidated > 0
-            ? (stats.lastPixelsInvalidated / totalPixels) * 100
-            : 0;
-
-        return {
-            missRate,
-            totalPixelsInvalidated: stats.totalPixelsInvalidated,
-            averagePixelsPerInvalidation: stats.averagePixelsPerInvalidation
-        };
     }
 
     public getBufferManager(): BufferManager {
@@ -222,15 +194,6 @@ export class WebGPURaytracerApp {
     }
 
     public cleanup(): void {
-        if (this.sphereEditor) {
-            this.sphereEditor.cleanup();
-            this.sphereEditor = null;
-        }
-
-        if (this.cameraController) {
-            this.cameraController.cleanup();
-            this.cameraController = null;
-        }
 
         if (this.bufferManager) {
             this.bufferManager.cleanup();

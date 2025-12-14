@@ -34,8 +34,9 @@ export class CameraController {
     }
 
     private setupEventListeners(): void {
-        window.addEventListener('keydown', (event) => this.onKeyDown(event));
-        window.addEventListener('keyup', (event) => this.onKeyUp(event));
+        // ⚠️ DEAKTIVIERT: Tastatur-Steuerung deaktiviert für Cache-Stabilität
+        // window.addEventListener('keydown', (event) => this.onKeyDown(event));
+        // window.addEventListener('keyup', (event) => this.onKeyUp(event));
     }
 
     private onKeyDown(event: KeyboardEvent): void {

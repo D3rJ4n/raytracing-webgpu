@@ -36,10 +36,8 @@ export class SphereEditor {
     }
 
     private setupEventListeners(): void {
-        this.canvas.addEventListener('mousedown', (event) => this.onMouseDown(event));
-        this.canvas.addEventListener('mousemove', (event) => this.onMouseMove(event));
-        this.canvas.addEventListener('mouseup', (event) => this.onMouseUp(event));
-        this.canvas.addEventListener('wheel', (event) => this.onWheel(event));
+        // Nur Click für UI-Auswahl aktiviert, Drag & Mausrad deaktiviert
+        this.canvas.addEventListener('click', (event) => this.onCanvasClick(event));
     }
 
     private updateMousePosition(event: MouseEvent): void {
@@ -48,7 +46,7 @@ export class SphereEditor {
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     }
 
-    private onMouseDown(event: MouseEvent): void {
+    private onCanvasClick(event: MouseEvent): void {
         if (event.button !== 0) return; // Nur linke Maustaste
 
         this.updateMousePosition(event);
@@ -75,24 +73,11 @@ export class SphereEditor {
 
             this.selectSphere(clickedSphere, sphereIndex);
             this.logger.info(`Kugel ausgewählt: ${clickedSphere.name} (Index: ${sphereIndex})`);
-
-            // Drag starten
-            this.isDragging = true;
-
-            // Erstelle eine Ebene parallel zur Kamera durch die Kugel-Position
-            const spherePosition = clickedSphere.position.clone();
-            const cameraDirection = new THREE.Vector3();
-            camera.getWorldDirection(cameraDirection);
-
-            this.dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, spherePosition);
-
-            // Berechne den Offset zwischen Mausposition und Kugelmittelpunkt
-            if (this.raycaster.ray.intersectPlane(this.dragPlane, this.dragIntersectionPoint)) {
-                this.dragOffset.copy(spherePosition).sub(this.dragIntersectionPoint);
-            }
-
-            this.canvas.style.cursor = 'move';
         }
+    }
+
+    private onMouseDown(event: MouseEvent): void {
+        // DEAKTIVIERT - wurde durch onCanvasClick ersetzt
     }
 
     private onMouseMove(event: MouseEvent): void {
@@ -200,10 +185,9 @@ export class SphereEditor {
 
             <div style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 12px;">
                 <strong>Steuerung:</strong><br>
-                • Klick + Ziehen: Kugel verschieben<br>
-                • Mausrad: Radius ändern<br>
                 • Werte eingeben und Enter drücken<br>
-                <em style="color: #4CAF50; font-size: 11px;">Selektive Cache-Invalidierung aktiv!</em>
+                • Oder "Änderungen übernehmen" klicken<br>
+                <em style="color: #4CAF50; font-size: 11px;">Nur UI-Eingabe aktiv (Cache-Safe)</em>
             </div>
 
             <div style="margin-bottom: 15px;">

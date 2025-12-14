@@ -51,6 +51,7 @@ export class Scene {
         this.createCamera();
         this.createGround();
 
+        // 500 Kugeln Grid erstellen
         this.setupRandomSpheres();
 
         this.logSceneInfo();
@@ -109,7 +110,7 @@ export class Scene {
         const minZ = -15;
         const maxZ = 15;
 
-        for (let i = 0; i < 200; i++) {
+        for (let i = 0; i < 50; i++) {
             const color = new THREE.Color();
             color.setHSL(i / 10, 0.7, 0.6);
 
@@ -152,18 +153,19 @@ export class Scene {
     /**
      * Animation um einen Frame vorwärts bewegen
      */
-    public updateAnimation(deltaTimeMs?: number): boolean {
+    public updateAnimation(): boolean {
         if (!this.isAnimationActive || this.animatedSpheres.size === 0) {
+            // console.log('🔴 Animation nicht aktiv oder keine animierten Spheres');
             return false;
         }
 
-        // Zeit berechnen
+        // ⚡ FIX: animationTime muss sich jedes Frame erhöhen!
+        // Zeit-Inkrement berechnen (wie viel Zeit ist seit dem letzten Frame vergangen)
         const currentTime = performance.now();
-        if (deltaTimeMs === undefined) {
-            deltaTimeMs = currentTime - this.animationStartTime;
-        }
+        const elapsedTime = currentTime - this.animationStartTime;
 
-        this.animationTime = (deltaTimeMs * 0.001) * this.animationSpeed; // In Sekunden umwandeln
+        // WICHTIG: animationTime ist die kumulierte Zeit seit Start, nicht deltaTime!
+        this.animationTime = (elapsedTime * 0.001) * this.animationSpeed; // In Sekunden umwandeln
 
         let hasMovement = false;
 
@@ -173,13 +175,18 @@ export class Scene {
             const original = sphere.userData.originalPosition;
 
             // Einfache Sinus-Animation in Y-Richtung
-            const amplitude = 2.0; // Bewegungsausschlag
-            const frequency = 1.0 + (index * 0.1); // Leicht unterschiedliche Frequenzen
+            const amplitude = 10.0; // Sehr große Bewegung für deutliche Sichtbarkeit
+            const frequency = 2.0 + (index * 0.1); // Schnellere Frequenz
 
             const oldY = sphere.position.y;
             const newY = original.y + Math.sin(this.animationTime * frequency) * amplitude;
 
             sphere.position.y = newY;
+
+            // ⚡ FIX: World-Matrix aktualisieren damit getWorldPosition() die neue Position sieht!
+            sphere.updateMatrixWorld(true);
+
+            // console.log(`🎬 Sphere ${index}: oldY=${oldY.toFixed(3)}, newY=${newY.toFixed(3)}, diff=${Math.abs(newY - oldY).toFixed(3)}, time=${this.animationTime.toFixed(3)}`);
 
             // Prüfe ob sich Position signifikant geändert hat
             if (Math.abs(newY - oldY) > 0.01) {
@@ -256,12 +263,16 @@ export class Scene {
     // ===== CORE API METHODEN =====
 
     public getSpheresData(): Float32Array {
-        const maxSpheres = 1000;
         const floatsPerSphere = 8;
-        const data = new Float32Array(maxSpheres * floatsPerSphere);
+        // ⚡ FIX: Array-Größe dynamisch anpassen an tatsächliche Sphere-Anzahl!
+        const actualSphereCount = this.meshes.length;
+        const data = new Float32Array(actualSphereCount * floatsPerSphere);
+
+        // ⚡ WICHTIG: Scene-Matrix aktualisieren damit alle Mesh-Matrizen aktuell sind
+        this.scene.updateMatrixWorld(true);
 
         this.meshes.forEach((mesh, index) => {
-            if (index >= maxSpheres) return;
+            if (index >= actualSphereCount) return;
 
             const geometry = mesh.geometry as THREE.SphereGeometry;
             const material = mesh.material as THREE.MeshStandardMaterial;
@@ -278,6 +289,11 @@ export class Scene {
 
             const worldPos = new THREE.Vector3();
             mesh.getWorldPosition(worldPos);
+
+            // Debug: Log erste Sphere
+            // if (index === 0) {
+            //     console.log(`📊 getSpheresData Sphere 0: worldPos.y=${worldPos.y.toFixed(3)}, mesh.position.y=${mesh.position.y.toFixed(3)}`);
+            // }
 
             data[offset + 0] = worldPos.x;
             data[offset + 1] = worldPos.y;
@@ -384,43 +400,6 @@ export class Scene {
         }
 
         this.logger.success(`${sphereCount} Kugeln für Performance-Test erstellt`);
-    }
-
-    /**
-     * Fügt zusätzliche Kugeln zur bestehenden Szene hinzu (ohne die alten zu verändern)
-     * Ideal für inkrementelle Cache-Tests
-     */
-    public addMoreSpheres(additionalCount: number): void {
-        const WORLD_SIZE = 50;
-        const currentCount = this.meshes.length;
-
-        for (let i = 0; i < additionalCount; i++) {
-            const x = (Math.random() - 0.5) * WORLD_SIZE;
-            const y = Math.random() * 20 + 2; // 2 bis 22
-            const z = (Math.random() - 0.5) * WORLD_SIZE;
-
-            const radius = 0.3 + Math.random() * 0.4;
-            const totalSpheres = currentCount + additionalCount;
-            const hue = (currentCount + i) / totalSpheres;
-
-            const sphere = new THREE.Mesh(
-                new THREE.SphereGeometry(radius, 12, 12),
-                new THREE.MeshStandardMaterial({
-                    color: new THREE.Color().setHSL(hue, 0.8, 0.6),
-                    metalness: Math.random() > 0.8 ? 0.9 : 0.1,
-                    roughness: 0.3 + Math.random() * 0.4
-                })
-            );
-
-            sphere.position.set(x, y, z);
-            sphere.name = `DynamicSphere_${currentCount + i}`;
-            sphere.userData.originalPosition = { x, y, z };
-
-            this.scene.add(sphere);
-            this.meshes.push(sphere);
-        }
-
-        this.logger.success(`${additionalCount} zusätzliche Kugeln hinzugefügt (gesamt: ${this.meshes.length})`);
     }
 
     public clearSpheres(): void {

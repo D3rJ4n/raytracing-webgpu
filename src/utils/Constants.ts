@@ -54,7 +54,7 @@ export const BUFFER_CONFIG = {
     },
     SPHERES: {
         MAX_COUNT: 5000,
-        BYTES_PER_SPHERE: 48,
+        BYTES_PER_SPHERE: 32,  // 8 floats * 4 bytes (position xyz, radius, color rgb, metallic)
         get SIZE() {
             return this.MAX_COUNT * this.BYTES_PER_SPHERE;
         },
@@ -69,9 +69,9 @@ export const BUFFER_CONFIG = {
         LABEL: 'Scene Config Buffer',
     },
     CACHE: {
-        COMPONENTS_PER_PIXEL: 6,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, valid
+        COMPONENTS_PER_PIXEL: 9,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, normalX, normalY, normalZ, valid
         BYTES_PER_COMPONENT: 4,      // 4 bytes pro float32
-        BYTES_PER_PIXEL: 24,         // 6 * 4 = 24 bytes pro Pixel
+        BYTES_PER_PIXEL: 36,         // 9 * 4 = 36 bytes pro Pixel
         LABEL: 'Geometry Cache Buffer',
     },
     // BVH-BUFFERS
@@ -100,14 +100,17 @@ export const BUFFER_CONFIG = {
     },
 } as const;
 
-// Cache-Layout pro Pixel (6 float32 Werte):
+// Cache-Layout pro Pixel (9 float32 Werte):
 export const GEOMETRY_CACHE = {
     SPHERE_INDEX: 0,    // Index 0: Welche Sphere (als float, 0.0 = invalid)
     HIT_DISTANCE: 1,    // Index 1: Entfernung zum Hit-Point
     HIT_POINT_X: 2,     // Index 2: Hit-Point X-Koordinate
     HIT_POINT_Y: 3,     // Index 3: Hit-Point Y-Koordinate
     HIT_POINT_Z: 4,     // Index 4: Hit-Point Z-Koordinate
-    VALID_FLAG: 5,      // Index 5: 1.0 = valid, 0.0 = invalid
+    NORMAL_X: 5,        // Index 5: Normal X-Koordinate
+    NORMAL_Y: 6,        // Index 6: Normal Y-Koordinate
+    NORMAL_Z: 7,        // Index 7: Normal Z-Koordinate
+    VALID_FLAG: 8,      // Index 8: 1.0 = valid, 0.0 = invalid
     // Spezielle Werte für SPHERE_INDEX
     INVALID_VALUE: 0.0,      // Kein Hit
     BACKGROUND_VALUE: -1.0,  // Background Hit
