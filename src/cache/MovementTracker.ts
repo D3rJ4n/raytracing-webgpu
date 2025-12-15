@@ -121,6 +121,10 @@ export class MovementTracker {
         this.lastCameraData = null;
     }
 
+    public isFirstFrame(): boolean {
+        return this.lastSpherePositions.size === 0 && this.lastCameraData === null;
+    }
+
     public cleanup(): void {
         this.reset();
         this.logger.cache('MovementTracker aufgeräumt');

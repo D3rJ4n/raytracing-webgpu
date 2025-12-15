@@ -16,11 +16,27 @@ export class SphereEditor {
     private uiContainer: HTMLDivElement | null = null;
     private onChangesApplied: ((sphereIndex: number) => void) | null = null;
 
+    // Bound event handlers for proper removal
+    private boundClick: (e: MouseEvent) => void;
+    private boundMouseDown: (e: MouseEvent) => void;
+    private boundMouseMove: (e: MouseEvent) => void;
+    private boundMouseUp: (e: MouseEvent) => void;
+    private boundWheel: (e: WheelEvent) => void;
+
+    // RAF-based drag throttling
+    private dragPending: boolean = false;
+    private dragRafId: number | null = null;
+
     // Drag-and-Drop State
     private isDragging: boolean = false;
     private dragPlane: THREE.Plane = new THREE.Plane();
     private dragOffset: THREE.Vector3 = new THREE.Vector3();
     private dragIntersectionPoint: THREE.Vector3 = new THREE.Vector3();
+
+    // Double-click detection
+    private lastClickTime: number = 0;
+    private lastClickedSphereIndex: number = -1;
+    private readonly DOUBLE_CLICK_THRESHOLD_MS: number = 300;
 
     constructor(scene: Scene, canvas: HTMLCanvasElement, onChangesApplied?: (sphereIndex: number) => void) {
         this.logger = Logger.getInstance();
@@ -30,14 +46,25 @@ export class SphereEditor {
         this.mouse = new THREE.Vector2();
         this.onChangesApplied = onChangesApplied || null;
 
+        // bind handlers so they can be removed later
+        this.boundClick = (event) => this.onCanvasClick(event);
+        this.boundMouseDown = (event) => this.onMouseDown(event);
+        this.boundMouseMove = (event) => this.onMouseMove(event);
+        this.boundMouseUp = (event) => this.onMouseUp(event);
+        this.boundWheel = (event) => this.onWheel(event);
+
         this.setupEventListeners();
         this.createUI();
         this.logger.success('SphereEditor initialisiert');
     }
 
     private setupEventListeners(): void {
-        // Nur Click für UI-Auswahl aktiviert, Drag & Mausrad deaktiviert
-        this.canvas.addEventListener('click', (event) => this.onCanvasClick(event));
+        // Mousedown für Auswahl + Drag-Start, Move/Up für Drag, Wheel für Radius
+        // KEIN click event — das verursacht Konflikte mit mousedown
+        this.canvas.addEventListener('mousedown', this.boundMouseDown);
+        this.canvas.addEventListener('mousemove', this.boundMouseMove);
+        this.canvas.addEventListener('mouseup', this.boundMouseUp);
+        this.canvas.addEventListener('wheel', this.boundWheel, { passive: false });
     }
 
     private updateMousePosition(event: MouseEvent): void {
@@ -71,13 +98,84 @@ export class SphereEditor {
             const match = clickedSphere.name.match(/(TestSphere|MassiveSphere|DynamicSphere)_(\d+)/);
             const sphereIndex = match ? parseInt(match[2]) : -1;
 
-            this.selectSphere(clickedSphere, sphereIndex);
-            this.logger.info(`Kugel ausgewählt: ${clickedSphere.name} (Index: ${sphereIndex})`);
+            // Nur wenn Regex passt, die Kugel wirklich auswählen
+            if (sphereIndex >= 0) {
+                this.selectSphere(clickedSphere, sphereIndex);
+                this.logger.info(`Kugel ausgewählt: ${clickedSphere.name} (Index: ${sphereIndex})`);
+            } else {
+                // Klick auf Background oder andere Meshes → deselect
+                this.deselectSphere();
+            }
+        } else {
+            this.deselectSphere();
         }
     }
 
     private onMouseDown(event: MouseEvent): void {
-        // DEAKTIVIERT - wurde durch onCanvasClick ersetzt
+        if (event.button !== 0) return; // nur linke Maustaste
+
+        this.updateMousePosition(event);
+
+        const camera = this.scene.getCamera();
+        this.raycaster.setFromCamera(this.mouse, camera);
+
+        // Raycast gegen alle Sphere-Meshes
+        const meshes = this.scene.getThreeScene().children.filter(
+            child => child instanceof THREE.Mesh && (
+                child.name.startsWith('TestSphere') ||
+                child.name.startsWith('MassiveSphere') ||
+                child.name.startsWith('DynamicSphere')
+            )
+        ) as THREE.Mesh[];
+
+        const intersects = this.raycaster.intersectObjects(meshes);
+
+        if (intersects.length > 0) {
+            const clickedSphere = intersects[0].object as THREE.Mesh;
+            const match = clickedSphere.name.match(/(TestSphere|MassiveSphere|DynamicSphere)_(\d+)/);
+            const sphereIndex = match ? parseInt(match[2]) : -1;
+
+            if (sphereIndex >= 0) {
+                // Auswahl (ohne UI anzeigen)
+                this.selectedSphere = clickedSphere;
+                this.selectedSphereIndex = sphereIndex;
+                this.logger.info(`Kugel ausgewählt: ${clickedSphere.name} (Index: ${sphereIndex})`);
+
+                // Prüfe auf Doppelklick (innerhalb 300ms auf gleiche Kugel)
+                const now = performance.now();
+                const isDoubleClick =
+                    this.lastClickedSphereIndex === sphereIndex &&
+                    (now - this.lastClickTime) < this.DOUBLE_CLICK_THRESHOLD_MS;
+
+                this.lastClickTime = now;
+                this.lastClickedSphereIndex = sphereIndex;
+
+                if (isDoubleClick) {
+                    // Doppelklick → UI anzeigen
+                    this.updateUI();
+                    this.showUI();
+                    this.logger.info(`Doppelklick auf Kugel ${sphereIndex} - UI angezeigt`);
+                }
+
+                // Drag-Ebene vorbereiten (unabhängig davon ob UI angezeigt wird)
+                const normal = new THREE.Vector3();
+                camera.getWorldDirection(normal).normalize();
+                this.dragPlane.setFromNormalAndCoplanarPoint(normal, this.selectedSphere.position);
+
+                // Schnittpunkt berechnen und Drag starten
+                if (this.raycaster.ray.intersectPlane(this.dragPlane, this.dragIntersectionPoint)) {
+                    this.dragOffset.copy(this.selectedSphere.position).sub(this.dragIntersectionPoint);
+                    this.isDragging = true;
+                    this.canvas.style.cursor = 'grabbing';
+                }
+            } else {
+                // Keine gültige Sphere → deselect
+                this.deselectSphere();
+            }
+        } else {
+            // Klick ins Leere → deselect
+            this.deselectSphere();
+        }
     }
 
     private onMouseMove(event: MouseEvent): void {
@@ -97,9 +195,14 @@ export class SphereEditor {
             // UI aktualisieren
             this.updateUI();
 
-            // Sofort GPU-Update mit selektiver Cache-Invalidierung
-            if (this.onChangesApplied && this.selectedSphereIndex >= 0) {
-                this.onChangesApplied(this.selectedSphereIndex);
+            // ⚡ Throttle GPU-Update mit RAF — nicht auf jedem mousemove rendern!
+            if (!this.dragPending && this.onChangesApplied && this.selectedSphereIndex >= 0) {
+                this.dragPending = true;
+                this.dragRafId = requestAnimationFrame(() => {
+                    this.onChangesApplied!(this.selectedSphereIndex);
+                    this.dragPending = false;
+                    this.dragRafId = null;
+                });
             }
         }
     }
@@ -333,6 +436,19 @@ export class SphereEditor {
     public cleanup(): void {
         if (this.uiContainer) {
             document.body.removeChild(this.uiContainer);
+        }
+        if (this.dragRafId !== null) {
+            cancelAnimationFrame(this.dragRafId);
+            this.dragRafId = null;
+        }
+        // Remove canvas event listeners
+        try {
+            this.canvas.removeEventListener('mousedown', this.boundMouseDown);
+            this.canvas.removeEventListener('mousemove', this.boundMouseMove);
+            this.canvas.removeEventListener('mouseup', this.boundMouseUp);
+            this.canvas.removeEventListener('wheel', this.boundWheel);
+        } catch (e) {
+            // ignore
         }
     }
 }

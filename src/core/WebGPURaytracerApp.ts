@@ -26,12 +26,15 @@ export class WebGPURaytracerApp {
     private renderPipeline: RenderPipeline;
     private renderer: Renderer;
     public pixelCache: Cache;
+    private cameraController: CameraController | null = null;
+    private sphereEditor: SphereEditor | null = null;
 
 
     private logger: Logger;
     private initialized: boolean = false;
 
     private frameCounter: number = 0;
+    private scheduledRenderRequest: number | null = null;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -99,6 +102,11 @@ export class WebGPURaytracerApp {
                 this.textureManager.getRenderTexture()
             );
 
+            // ⚡ Registriere Pipelines und TextureManager in BufferManager für BindGroup Updates
+            this.bufferManager.registerComputePipeline(this.computePipeline);
+            this.bufferManager.registerTextureManager(this.textureManager);
+            this.bufferManager.registerRenderer(this.renderer);
+
             await this.renderPipeline.initialize(
                 this.webgpuDevice.getDevice(),
                 this.textureManager.getRenderTexture(),
@@ -115,6 +123,37 @@ export class WebGPURaytracerApp {
             );
 
             this.pixelCache.reset();
+
+            // UI Controllers: Kamera- und Kugel-Editor initialisieren
+            this.cameraController = new CameraController(this.scene, () => {
+                try {
+                    // Update Camera buffer und Invalidation (synchron)
+                    this.bufferManager.updateCameraData(this.scene.getCameraData());
+                    // Invalidation wird asynchron im Hintergrund ausgeführt
+                    this.bufferManager.invalidateForSceneChanges(this.scene, { type: 'structural' }).catch(e => {
+                        this.logger.error('Fehler beim Camera-Invalidation', e);
+                    });
+
+                    // Request a non-recursive render (schedules via requestAnimationFrame)
+                    this.requestRender();
+                } catch (e) {
+                    this.logger.error('Fehler beim CameraController callback', e);
+                }
+            });
+
+            this.sphereEditor = new SphereEditor(this.scene, this.canvas, (sphereIndex: number) => {
+                try {
+                    // Apply immediate GPU update for the changed sphere (asynchron)
+                    this.bufferManager.updateSpheresFromScene(this.scene, { type: 'geometry', sphereIndex }).catch(e => {
+                        this.logger.error('Fehler beim Sphere-Update', e);
+                    });
+
+                    // Schedule a render so UI changes become visible without recursion
+                    this.requestRender();
+                } catch (e) {
+                    this.logger.error('Fehler beim SphereEditor callback', e);
+                }
+            });
 
             this.initialized = true;
             await this.renderFrame();
@@ -135,6 +174,15 @@ export class WebGPURaytracerApp {
 
         this.frameCounter++;
 
+        // Allow camera controller to apply continuous movement for held keys
+        if (this.cameraController) {
+            try {
+                this.cameraController.update();
+            } catch (e) {
+                this.logger.error('Fehler beim CameraController.update()', e);
+            }
+        }
+
         // Update animation if active
         const isAnimating = this.scene.isAnimating();
         if (isAnimating) {
@@ -143,33 +191,21 @@ export class WebGPURaytracerApp {
 
         // Update spheres buffer with current Three.js positions
         // Jetzt mit automatischer Cache-Invalidation!
-        console.log(`\n🎬 FRAME ${this.frameCounter}: Starting buffer update...`);
+        // console.log(`\n🎬 FRAME ${this.frameCounter}: Starting buffer update...`);
         await this.bufferManager.updateSpheresFromScene(this.scene);
-        console.log(`📦 Buffer update complete`);
+        //console.log(`📦 Buffer update complete`);
 
-        // ⚡ KRITISCH: Doppelter GPU-Sync für Stabilität
-        console.log(`⏳ First GPU sync...`);
-        const sync1Start = performance.now();
-        await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
-        console.log(`✅ First sync done (${(performance.now() - sync1Start).toFixed(2)}ms)`);
-
-        console.log(`⏳ Second GPU sync...`);
-        const sync2Start = performance.now();
-        await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
-        console.log(`✅ Second sync done (${(performance.now() - sync2Start).toFixed(2)}ms)`);
-
-        console.log(`🎨 Starting render...`);
         await this.renderer.renderFrame(this.canvas);
-        console.log(`✅ Render complete\n`);
         await this.webgpuDevice.getDevice().queue.onSubmittedWorkDone();
-
-        await this.pixelCache.readStatistics();
+        //console.log(`✅ Render complete\n`);
+        // Cache stats readback disabled by default to avoid map/submit races
+        // await this.pixelCache.readStatistics();
 
         // Periodically log instrumentation (every 60 frames)
         if (this.frameCounter % 60 === 0) {
             try {
                 const writeCalls = this.bufferManager.getInvalidationWriteBufferCount();
-                console.log(`🔧 invalidation writeBuffer calls (last 60 frames): ${writeCalls}`);
+                // console.log(`🔧 invalidation writeBuffer calls (last 60 frames): ${writeCalls}`);
                 this.bufferManager.resetInvalidationWriteBufferCount();
             } catch (e) {
                 // ignore
@@ -177,12 +213,35 @@ export class WebGPURaytracerApp {
         }
 
         // Removed excessive debug logging
+
+        // If camera keys are still held, schedule another frame to continue movement
+        if (this.cameraController && this.cameraController.hasActiveKeys()) {
+            this.requestRender();
+        }
+    }
+
+    /**
+     * Schedules a safe render via requestAnimationFrame. Multiple calls are coalesced.
+     */
+    public requestRender(): void {
+        if (this.scheduledRenderRequest !== null) return;
+
+        this.scheduledRenderRequest = requestAnimationFrame(async () => {
+            this.scheduledRenderRequest = null;
+            try {
+                await this.renderFrame();
+            } catch (e) {
+                this.logger.error('Fehler in scheduled renderFrame', e);
+            }
+        });
     }
 
     public resetCache(): void {
         this.pixelCache.reset();
-        this.bufferManager.resetSphereHash(); // ⚡ FIX: Auch Sphere-Hash resetten!
+        // NICHT forceNextUpdate() - wir wollen nur Cache leeren, nicht Buffer updaten!
+        this.bufferManager.resetInvalidationStats(); // MovementTracker resetten
         this.frameCounter = 0;
+        // console.log(`🔄 Cache zurückgesetzt`);
     }
 
     public getBufferManager(): BufferManager {
@@ -205,6 +264,16 @@ export class WebGPURaytracerApp {
 
         if (this.scene) {
             this.scene.cleanup();
+        }
+
+        if (this.cameraController) {
+            this.cameraController.cleanup();
+            this.cameraController = null;
+        }
+
+        if (this.sphereEditor) {
+            this.sphereEditor.cleanup();
+            this.sphereEditor = null;
         }
 
         this.initialized = false;

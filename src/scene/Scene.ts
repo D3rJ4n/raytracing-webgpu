@@ -260,6 +260,20 @@ export class Scene {
         this.animationTime = 0;
     }
 
+    /**
+     * Nudge the first `count` spheres by a small random offset (one-time movement)
+     */
+    public nudgeSpheres(count: number, maxOffset: number = 5): void {
+        const actual = Math.min(count, this.meshes.length);
+        for (let i = 0; i < actual; i++) {
+            const mesh = this.meshes[i];
+            mesh.position.x += (Math.random() - 0.5) * maxOffset;
+            mesh.position.y += (Math.random() - 0.5) * maxOffset;
+            mesh.position.z += (Math.random() - 0.5) * maxOffset;
+            mesh.updateMatrixWorld(true);
+        }
+    }
+
     // ===== CORE API METHODEN =====
 
     public getSpheresData(): Float32Array {

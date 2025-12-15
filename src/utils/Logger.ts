@@ -48,8 +48,11 @@ export class Logger {
             return;
         }
 
-        const prefix = `${emoji} [${category}]`;
-        console.log(`${prefix} ${message}`, ...args);
+        // Only surface ERROR-level logs to console to avoid noisy output.
+        if (level >= LogLevel.ERROR) {
+            const prefix = `${emoji} [${category}]`;
+            console.error(`${prefix} ${message}`, ...args);
+        }
     }
 
     private shouldSkipInMinimalMode(category: string, message: string): boolean {

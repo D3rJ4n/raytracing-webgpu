@@ -6,6 +6,10 @@ export class Cache {
     private cacheBuffer: GPUBuffer | null = null;
     private stagingBuffer: GPUBuffer | null = null;
     private logger: Logger;
+    private mapPending: boolean = false;
+    private lastReadTime: number = 0;
+    private readonly READ_THROTTLE_MS: number = 100; // Max 1x pro 100ms
+    private enableStats: boolean = false; // Disabled by default to avoid map/submit races
 
     private stats = {
         totalPixels: 0,
@@ -43,8 +47,21 @@ export class Cache {
     }
 
     public async readStatistics(): Promise<void> {
+        // Disabled by default — enable only for debugging via `setStatsEnabled(true)`
+        if (!this.enableStats) return;
+
         if (!this.device || !this.cacheBuffer || !this.stagingBuffer) {
             throw new Error('Cache-System nicht initialisiert');
+        }
+
+        // Throttle: maximal 1x pro READ_THROTTLE_MS
+        const now = performance.now();
+        if (now - this.lastReadTime < this.READ_THROTTLE_MS) {
+            return;
+        }
+
+        if (this.mapPending) {
+            return;
         }
 
         try {
@@ -58,18 +75,35 @@ export class Cache {
 
             await this.device.queue.onSubmittedWorkDone();
 
-            await this.stagingBuffer.mapAsync(GPUMapMode.READ);
+            this.mapPending = true;
+            try {
+                await this.stagingBuffer.mapAsync(GPUMapMode.READ);
+            } catch (mapError) {
+                this.mapPending = false;
+                return;
+            }
+
             const arrayBuffer = this.stagingBuffer.getMappedRange();
             const cacheData = new Float32Array(arrayBuffer);
 
             this.calculateStatistics(cacheData);
 
             this.stagingBuffer.unmap();
+            this.mapPending = false;
+            this.lastReadTime = performance.now();
 
         } catch (error) {
-            this.logger.error('Fehler beim Lesen der Cache-Statistiken:', error);
-            throw error;
+            this.mapPending = false;
+            if (error instanceof Error && !error.message.includes('outstanding map')) {
+                this.logger.error('Fehler beim Lesen der Cache-Statistiken:', error);
+            }
+            // swallow to avoid bubbling WebGPUValidationError into app flow
+            return;
         }
+    }
+
+    public setStatsEnabled(enabled: boolean): void {
+        this.enableStats = enabled;
     }
 
     private calculateStatistics(cacheData: Float32Array): void {
@@ -129,6 +163,8 @@ export class Cache {
 
         this.stats.cacheHits = 0;
         this.stats.cacheMisses = this.stats.totalPixels;
+        this.mapPending = false;
+        this.lastReadTime = 0;
 
         // Removed verbose reset logging
     }

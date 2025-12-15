@@ -33,6 +33,13 @@ export class Renderer {
         this.renderBindGroup = renderBindGroup;
     }
 
+    /**
+     * 🔄 Compute BindGroup aktualisieren (wenn Buffer sich ändern)
+     */
+    public updateComputeBindGroup(newBindGroup: GPUBindGroup): void {
+        this.computeBindGroup = newBindGroup;
+    }
+
     public async renderFrame(canvas: HTMLCanvasElement): Promise<number> {
         if (!this.isInitialized()) {
             throw new Error('Renderer nicht initialisiert');

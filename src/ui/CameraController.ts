@@ -11,6 +11,27 @@ export class CameraController {
     private camera: THREE.PerspectiveCamera;
     private onCameraChanged: (() => void) | null = null;
 
+
+    /**
+     * Wird jede Frame aufgerufen, um kontinuierliche Bewegung bei gehaltenen Tasten zu ermöglichen.
+     */
+    public update(): void {
+        if (this.keysPressed.size === 0) {
+            return;
+        }
+
+        // Für jede gedrückte Taste einmal Bewegung anwenden
+        for (const key of Array.from(this.keysPressed)) {
+            this.handleCameraMovement(key);
+        }
+    }
+
+    /**
+     * Gibt zurück, ob aktuell Tasten gedrückt sind (für die App-Render-Loop)
+     */
+    public hasActiveKeys(): boolean {
+        return this.keysPressed.size > 0;
+    }
     // Bewegungsgeschwindigkeiten
     private moveSpeed: number = 0.5; // Einheiten pro Tastendruck
     private rotateSpeed: number = 0.05; // Radians pro Tastendruck
@@ -19,6 +40,9 @@ export class CameraController {
     // Keyboard State
     private keysPressed: Set<string> = new Set();
     private isActive: boolean = false;
+    // bound handlers for proper removal
+    private boundKeyDown: (e: KeyboardEvent) => void;
+    private boundKeyUp: (e: KeyboardEvent) => void;
 
     constructor(scene: Scene, onCameraChanged?: () => void) {
         this.logger = Logger.getInstance();
@@ -29,14 +53,18 @@ export class CameraController {
         // Initialen LookAt-Target berechnen
         this.updateLookAtTarget();
 
+        // bind handlers for add/remove
+        this.boundKeyDown = (event) => this.onKeyDown(event);
+        this.boundKeyUp = (event) => this.onKeyUp(event);
+
         this.setupEventListeners();
         this.logger.success('CameraController initialisiert');
     }
 
     private setupEventListeners(): void {
-        // ⚠️ DEAKTIVIERT: Tastatur-Steuerung deaktiviert für Cache-Stabilität
-        // window.addEventListener('keydown', (event) => this.onKeyDown(event));
-        // window.addEventListener('keyup', (event) => this.onKeyUp(event));
+        // Tastatur-Steuerung aktivieren (WASD + Pfeiltasten + QE)
+        window.addEventListener('keydown', this.boundKeyDown);
+        window.addEventListener('keyup', this.boundKeyUp);
     }
 
     private onKeyDown(event: KeyboardEvent): void {
@@ -129,6 +157,11 @@ export class CameraController {
             camera.lookAt(this.lookAtTarget);
             camera.updateProjectionMatrix();
 
+            console.log(
+                `🎥 Kamera bewegt: Pos(${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)}) ` +
+                `LookAt(${this.lookAtTarget.x.toFixed(2)}, ${this.lookAtTarget.y.toFixed(2)}, ${this.lookAtTarget.z.toFixed(2)})`
+            );
+
             this.logger.info(
                 `Kamera: Pos(${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)}) ` +
                 `LookAt(${this.lookAtTarget.x.toFixed(2)}, ${this.lookAtTarget.y.toFixed(2)}, ${this.lookAtTarget.z.toFixed(2)})`
@@ -202,8 +235,12 @@ export class CameraController {
     }
 
     public cleanup(): void {
-        window.removeEventListener('keydown', (event) => this.onKeyDown(event));
-        window.removeEventListener('keyup', (event) => this.onKeyUp(event));
+        try {
+            window.removeEventListener('keydown', this.boundKeyDown);
+            window.removeEventListener('keyup', this.boundKeyUp);
+        } catch (e) {
+            // ignore
+        }
         this.keysPressed.clear();
     }
 }
