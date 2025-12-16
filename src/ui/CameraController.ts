@@ -157,15 +157,7 @@ export class CameraController {
             camera.lookAt(this.lookAtTarget);
             camera.updateProjectionMatrix();
 
-            console.log(
-                `🎥 Kamera bewegt: Pos(${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)}) ` +
-                `LookAt(${this.lookAtTarget.x.toFixed(2)}, ${this.lookAtTarget.y.toFixed(2)}, ${this.lookAtTarget.z.toFixed(2)})`
-            );
-
-            this.logger.info(
-                `Kamera: Pos(${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)}) ` +
-                `LookAt(${this.lookAtTarget.x.toFixed(2)}, ${this.lookAtTarget.y.toFixed(2)}, ${this.lookAtTarget.z.toFixed(2)})`
-            );
+            // Kamera-Bewegungslogs entfernt für ruhigere Konsole
 
             // Callback triggern → komplette Cache-Invalidierung
             if (this.onCameraChanged) {

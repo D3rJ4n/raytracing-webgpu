@@ -21,7 +21,7 @@ export class InvalidationManager {
     private screenProjection: ScreenProjection;
     private stats: InvalidationStats;
     private writeBufferCallCount: number = 0;
-    private debugMode: boolean = true;
+    private debugMode: boolean = false;
 
     constructor(
         device: GPUDevice,
@@ -37,7 +37,9 @@ export class InvalidationManager {
         this.movementTracker = new MovementTracker();
         this.screenProjection = new ScreenProjection(canvasWidth, canvasHeight);
         this.stats = new InvalidationStats();
-        this.logger.cache('InvalidationManager mit selektiver Invalidierung initialisiert');
+        if (this.debugMode) {
+            this.logger.cache('InvalidationManager mit selektiver Invalidierung initialisiert');
+        }
     }
 
     public resetWriteBufferCount(): void {
@@ -81,7 +83,7 @@ export class InvalidationManager {
         } else if (movedSpheres.length > 0) {
             // ✅ Selektive Invalidierung für bewegte Spheres!
             // this.logger.cache(`🔄 ${movedSpheres.length} Sphere(s) bewegt - SELEKTIVE Invalidierung`);
-            result = await this.handleObjectMovements(movedSpheres, spheresData, oldPositions, cameraData);
+            result = await this.handleObjectMovements(movedSpheres, spheresData, oldPositions);
             result.cameraInvalidation = false;
         } else {
             result = {
@@ -131,8 +133,7 @@ export class InvalidationManager {
     private async handleObjectMovements(
         movedSpheres: number[],
         spheresData: Float32Array,
-        oldPositions: Map<number, { x: number; y: number; z: number }>,
-        cameraData: Float32Array
+        oldPositions: Map<number, { x: number; y: number; z: number }>
     ): Promise<InvalidationResult> {
         const startTime = performance.now();
         let totalPixelsInvalidated = 0;
@@ -140,107 +141,32 @@ export class InvalidationManager {
 
         for (const sphereIndex of movedSpheres) {
             const sphereData = this.extractSphereData(spheresData, sphereIndex);
-            const oldPosition = oldPositions.get(sphereIndex); // ⚡ FIX: Benutze gespeicherte alte Position!
+            const oldPosition = oldPositions.get(sphereIndex);
 
-            if (oldPosition && sphereData) {
-                // ⚡ DEBUG: Aktiviert für Debugging
-                //console.log(`🎯 Invalidation Sphere ${sphereIndex}:`);
-                //console.log(`   Old Pos: (${oldPosition.x.toFixed(2)}, ${oldPosition.y.toFixed(2)}, ${oldPosition.z.toFixed(2)})`);
-                //console.log(`   New Pos: (${sphereData.position.x.toFixed(2)}, ${sphereData.position.y.toFixed(2)}, ${sphereData.position.z.toFixed(2)})`);
-                //console.log(`   Radius: ${sphereData.radius.toFixed(2)}`);
+            if (!oldPosition || !sphereData) {
+                continue;
+            }
 
-                // KUGEL-BOUNDS (alte + neue Position)
-                const oldSphereBounds = this.screenProjection.sphereToScreenBounds(
-                    oldPosition,
-                    sphereData.radius
-                );
+            const oldSphereBounds = this.screenProjection.sphereToScreenBounds(oldPosition, sphereData.radius);
+            const newSphereBounds = this.screenProjection.sphereToScreenBounds(sphereData.position, sphereData.radius);
 
-                const newSphereBounds = this.screenProjection.sphereToScreenBounds(
-                    sphereData.position,
-                    sphereData.radius
-                );
+            const sphereScreenRadius = this.estimateSphereScreenRadius(newSphereBounds);
+            // Smaller, more reasonable padding: ~1x radius, clamped to [6, 32]
+            const baseMargin = Math.min(Math.max(sphereScreenRadius * 1.0, 6), 32);
 
-                // console.log(`   Old Bounds: [${oldSphereBounds.minX}, ${oldSphereBounds.minY}] to [${oldSphereBounds.maxX}, ${oldSphereBounds.maxY}]`);
-                // console.log(`   New Bounds: [${newSphereBounds.minX}, ${newSphereBounds.minY}] to [${newSphereBounds.maxX}, ${newSphereBounds.maxY}]`);
+            // Union first, then apply a single padding
+            const unionBounds = this.screenProjection.unionMultipleBounds([
+                oldSphereBounds,
+                newSphereBounds
+            ]);
+            const expandedBounds = this.addMarginToBounds(unionBounds, baseMargin);
 
-                //console.log(`   Old Bounds: [${oldSphereBounds.minX}, ${oldSphereBounds.minY}] to [${oldSphereBounds.maxX}, ${oldSphereBounds.maxY}]`);
-                //console.log(`   New Bounds: [${newSphereBounds.minX}, ${newSphereBounds.minY}] to [${newSphereBounds.maxX}, ${newSphereBounds.maxY}]`);
-
-                const combinedBounds = this.screenProjection.unionMultipleBounds([
-                    oldSphereBounds,
-                    newSphereBounds
-                ]);
-
-
-                // → Wir müssen NUR Pixel invalidieren die die Sphere DIREKT sehen!
-                const sphereScreenRadius = Math.max(
-                    newSphereBounds.maxX - newSphereBounds.minX,
-                    newSphereBounds.maxY - newSphereBounds.minY
-                );
-
-                // Margin-Strategie: Nur für DIREKTE Sichtbarkeit + Safety-Margin
-                //
-                // Da Schatten nicht gecacht werden, brauchen wir nur:
-                //   1. Die Sphere-Bounds selbst
-                //   2. Kleiner Safety-Margin für Ungenauigkeiten (Anti-Aliasing, Subpixel-Position)
-                //
-                // Safety-Margin: 2-3x der Screen-Radius ist genug!
-                const baseMargin = sphereScreenRadius * 3; // Nur 3x statt 15-30x!
-                const minMargin = 10; // Minimum 10 Pixel für sehr kleine Spheres
-                const maxMargin = 100; // Maximum 100 Pixel (verhindere zu große Bereiche)
-                const margin = Math.max(minMargin, Math.min(baseMargin, maxMargin));
-
-                //console.log(`   📏 Screen-Radius: ${sphereScreenRadius.toFixed(1)}px`);
-
-                const expandedBounds = this.screenProjection.expandBounds(combinedBounds, margin);
-                // console.log(`   📏 Margin: ${margin.toFixed(1)}, Expanded: [${expandedBounds.minX}, ${expandedBounds.minY}] to [${expandedBounds.maxX}, ${expandedBounds.maxY}]`);
-                // console.log(`   📏 Sphere Screen Radius: ${sphereScreenRadius.toFixed(1)}, Margin: ${margin.toFixed(1)}`);
-                // console.log(`   Combined Bounds: [${expandedBounds.minX}, ${expandedBounds.minY}] to [${expandedBounds.maxX}, ${expandedBounds.maxY}]`);
-
-                // ⚡ DEBUG: Prüfe ob Sphere-Position in den Bounds liegt
-                // const sphereCenterScreenX = (newSphereBounds.minX + newSphereBounds.maxX) / 2;
-                // const sphereCenterScreenY = (newSphereBounds.minY + newSphereBounds.maxY) / 2;
-                // const isInBounds = sphereCenterScreenX >= expandedBounds.minX &&
-                //                    sphereCenterScreenX <= expandedBounds.maxX &&
-                //                    sphereCenterScreenY >= expandedBounds.minY &&
-                //                    sphereCenterScreenY <= expandedBounds.maxY;
-                // console.log(`   🎯 Sphere center screen: (${sphereCenterScreenX.toFixed(1)}, ${sphereCenterScreenY.toFixed(1)}), in bounds: ${isInBounds}`);
-
-                // Prüfe ob Bounds gültig sind
-                const isValid = this.screenProjection.isValidBounds(expandedBounds);
-                //console.log(`   ✅ Bounds valid: ${isValid}`);
-
-                if (isValid) {
-                    const pixelsInRegion = await this.invalidateRegion(expandedBounds);
-                    totalPixelsInvalidated += pixelsInRegion;
-                    regionsCount++;
-                    // console.log(`   📝 Invalidated ${pixelsInRegion} pixels in region`);
-
-                    if (this.debugMode) {
-                        const area = this.screenProjection.calculateBoundsArea(expandedBounds);
-                        const percentage = (area / (this.canvasWidth * this.canvasHeight)) * 100;
-                        //   this.logger.cache(`  Sphere ${sphereIndex}: ${pixelsInRegion} pixels (${percentage.toFixed(2)}%)`);
-                    }
-                }
+            const pixels = await this.invalidateRegion(expandedBounds);
+            if (pixels > 0) {
+                totalPixelsInvalidated += pixels;
+                regionsCount++;
             }
         }
-        //console.log(`\n🔄 Total: ${movedSpheres.length} Spheres moved, ${totalPixelsInvalidated} pixels invalidated`);
-
-        // ⚡ KRITISCH: GPU Queue Force-Flush!
-        // writeBuffer ist lazy - wir müssen die Queue mit einem leeren Command Buffer flushen
-        //console.log(`⏳ Force GPU queue flush with empty command...`);
-        const flushStart = performance.now();
-        const commandEncoder = this.device.createCommandEncoder();
-        this.device.queue.submit([commandEncoder.finish()]);
-        await this.device.queue.onSubmittedWorkDone();
-        const flushTime = performance.now() - flushStart;
-        //console.log(`✅ GPU queue flushed (took ${flushTime.toFixed(2)}ms)\n`);
-
-        const invalidationPercentage = (totalPixelsInvalidated / (this.canvasWidth * this.canvasHeight)) * 100;
-        // this.logger.cache(
-        //    `✅ SELEKTIVE INVALIDIERUNG: ${movedSpheres.length} Spheres, ` +
-        //    `${totalPixelsInvalidated.toLocaleString()} pixels (${invalidationPercentage.toFixed(2)}%)`
-        // );
 
         return {
             pixelsInvalidated: totalPixelsInvalidated,
@@ -253,11 +179,12 @@ export class InvalidationManager {
     private async invalidateRegion(bounds: {
         minX: number; minY: number; maxX: number; maxY: number;
     }): Promise<number> {
+        // ⚠️ Die Bounds sollten BEREITS gekürzt sein, aber wir sichern nochmal ab
         const safeBounds = {
-            minX: Math.max(0, Math.min(this.canvasWidth - 1, Math.floor(bounds.minX))),
-            minY: Math.max(0, Math.min(this.canvasHeight - 1, Math.floor(bounds.minY))),
-            maxX: Math.max(0, Math.min(this.canvasWidth - 1, Math.ceil(bounds.maxX))),
-            maxY: Math.max(0, Math.min(this.canvasHeight - 1, Math.ceil(bounds.maxY)))
+            minX: Math.max(0, Math.floor(bounds.minX)),
+            minY: Math.max(0, Math.floor(bounds.minY)),
+            maxX: Math.min(this.canvasWidth - 1, Math.ceil(bounds.maxX)),
+            maxY: Math.min(this.canvasHeight - 1, Math.ceil(bounds.maxY))
         };
 
         if (safeBounds.minX > safeBounds.maxX || safeBounds.minY > safeBounds.maxY) {
@@ -267,9 +194,8 @@ export class InvalidationManager {
         const componentsPerPixel = BUFFER_CONFIG.CACHE.COMPONENTS_PER_PIXEL;
         const bytesPerComponent = BUFFER_CONFIG.CACHE.BYTES_PER_COMPONENT;
 
-        // ⚡ OPTIMIERUNG: Schreibe Zeile für Zeile (row-by-row)
+        // Schreibe Zeile für Zeile (row-by-row)
         // Das ist notwendig weil der Cache-Buffer im Zeilenformat organisiert ist
-        // console.log(`   🔧 invalidateRegion: Writing ${safeBounds.maxY - safeBounds.minY + 1} rows...`);
         for (let y = safeBounds.minY; y <= safeBounds.maxY; y++) {
             const rowWidth = safeBounds.maxX - safeBounds.minX + 1;
             if (rowWidth <= 0) continue;
@@ -278,15 +204,9 @@ export class InvalidationManager {
             const firstPixelIndex = y * this.canvasWidth + safeBounds.minX;
             const byteOffset = firstPixelIndex * componentsPerPixel * bytesPerComponent;
 
-            // Debug: Log erste, mittlere, letzte Zeile (DEAKTIVIERT)
-            // if (y === safeBounds.minY || y === safeBounds.maxY || y === Math.floor((safeBounds.minY + safeBounds.maxY) / 2)) {
-            //     console.log(`      Row ${y}: pixels [${safeBounds.minX}-${safeBounds.maxX}], pixelIndex=${firstPixelIndex}, byteOffset=${byteOffset}, components=${rowWidth * componentsPerPixel}`);
-            // }
-
             this.device.queue.writeBuffer(this.cacheBuffer, byteOffset, rowData);
             this.writeBufferCallCount++;
         }
-        // console.log(`   ✅ Wrote ${this.writeBufferCallCount} writeBuffer calls`);
 
         // Berechne invalidierte Pixel
         const pixelsInvalidated = (safeBounds.maxX - safeBounds.minX + 1) *
@@ -308,6 +228,16 @@ export class InvalidationManager {
             invalidationTime: 0,
             cameraInvalidation: false
         };
+    }
+
+    private addMarginToBounds(bounds: { minX: number; minY: number; maxX: number; maxY: number }, margin: number) {
+        return this.screenProjection.expandBounds(bounds, margin);
+    }
+
+    private estimateSphereScreenRadius(bounds: { minX: number; minY: number; maxX: number; maxY: number }): number {
+        const width = bounds.maxX - bounds.minX;
+        const height = bounds.maxY - bounds.minY;
+        return Math.max(width, height) * 0.5;
     }
 
     private extractSphereData(spheresData: Float32Array, sphereIndex: number): {
@@ -333,10 +263,6 @@ export class InvalidationManager {
     public setDebugMode(enabled: boolean): void {
         this.debugMode = enabled;
         this.logger.cache(`InvalidationManager Debug: ${enabled ? 'ON' : 'OFF'}`);
-    }
-
-    public resetWriteBufferCallCount(): void {
-        this.writeBufferCallCount = 0;
     }
 
     public getStats() {

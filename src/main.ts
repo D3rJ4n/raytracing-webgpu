@@ -8,11 +8,6 @@ async function main(): Promise<void> {
     const logger = Logger.getInstance();
     logger.setMinimalMode(true);
 
-    // Silence console output (non-errors) per user request
-    (console as any).log = () => { };
-    (console as any).info = () => { };
-    (console as any).debug = () => { };
-
     try {
         logger.success('🚀 Starte WebGPU Raytracer...');
 
@@ -21,6 +16,9 @@ async function main(): Promise<void> {
 
         // App global verfügbar machen für Debugging
         (window as any).app = app;
+
+        // Setup Performance Tests
+        setupPerformanceTests(app);
 
         // ===== ANIMATIONS-HELPER FUNKTIONEN =====
         let animationLoopRunning = false;

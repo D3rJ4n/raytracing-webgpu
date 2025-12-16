@@ -125,7 +125,10 @@ export class ScreenProjection {
         // Sphere-Center projizieren
         const screenCenterX = (cameraSpacePos.x / depth / cache.halfWidth + 1.0) * 0.5 * this.canvasWidth;
         const screenCenterY = (-cameraSpacePos.y / depth / cache.halfHeight + 1.0) * 0.5 * this.canvasHeight;
-        const screenRadius = (radius / depth) * (cache.halfHeight * this.canvasHeight * 0.5);
+
+        const screenRadiusX = (radius / depth / cache.halfWidth) * (0.5 * this.canvasWidth);
+        const screenRadiusY = (radius / depth / cache.halfHeight) * (0.5 * this.canvasHeight);
+        const screenRadius = Math.max(screenRadiusX, screenRadiusY);
 
         return {
             minX: Math.max(0, Math.floor(screenCenterX - screenRadius)),
@@ -169,11 +172,13 @@ export class ScreenProjection {
             z: camera.lookAt.z - camera.position.z
         });
 
+        // Match the compute shader basis (see getCameraRay in compute.wgsl):
+        // right = normalize(cross(forward, worldUp))
+        // up    = cross(right, forward)
         const worldUp = { x: 0, y: 1, z: 0 };
-        cache.right = this.normalize(this.cross(worldUp, cache.forward));
-        cache.up = this.cross(cache.forward, cache.right);
+        cache.right = this.normalize(this.cross(cache.forward, worldUp));
+        cache.up = this.cross(cache.right, cache.forward);
 
-        // Frustum Dimensionen
         cache.halfHeight = Math.tan(camera.fov * 0.5);
         cache.halfWidth = cache.halfHeight * camera.aspect;
 
@@ -229,10 +234,10 @@ export class ScreenProjection {
         if (!this.isValidBounds(bounds)) return bounds;
 
         return {
-            minX: Math.max(0, bounds.minX - padding),
-            minY: Math.max(0, bounds.minY - padding),
-            maxX: Math.min(this.canvasWidth - 1, bounds.maxX + padding),
-            maxY: Math.min(this.canvasHeight - 1, bounds.maxY + padding)
+            minX: Math.max(0, Math.floor(bounds.minX - padding)),
+            minY: Math.max(0, Math.floor(bounds.minY - padding)),
+            maxX: Math.min(this.canvasWidth - 1, Math.ceil(bounds.maxX + padding)),
+            maxY: Math.min(this.canvasHeight - 1, Math.ceil(bounds.maxY + padding))
         };
     }
 

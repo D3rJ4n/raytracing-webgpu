@@ -6,6 +6,7 @@ export class WebGPUDevice {
     private context: GPUCanvasContext | null = null;
     private adapter: GPUAdapter | null = null;
     private logger: Logger;
+    private boundUncapturedErrorHandler: ((event: Event) => void) | null = null;
 
     constructor() {
         this.logger = Logger.getInstance();
@@ -53,10 +54,13 @@ export class WebGPUDevice {
             throw new Error('Device nicht verfügbar');
         }
 
-        this.device.addEventListener('uncapturederror', (event) => {
+        // Store bound handler for later removal
+        this.boundUncapturedErrorHandler = (event: Event) => {
             const error = (event as any).error;
             this.logger.error('WebGPU-Fehler:', error);
-        });
+        };
+
+        this.device.addEventListener('uncapturederror', this.boundUncapturedErrorHandler);
     }
 
     private configureCanvas(canvas: HTMLCanvasElement): void {
@@ -104,6 +108,16 @@ export class WebGPUDevice {
     }
 
     public cleanup(): void {
+        // Remove event listener before nullifying device
+        if (this.device && this.boundUncapturedErrorHandler) {
+            try {
+                this.device.removeEventListener('uncapturederror', this.boundUncapturedErrorHandler);
+            } catch (e) {
+                // ignore - device may already be destroyed
+            }
+        }
+
+        this.boundUncapturedErrorHandler = null;
         this.device = null;
         this.context = null;
         this.adapter = null;

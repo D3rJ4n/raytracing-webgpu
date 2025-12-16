@@ -238,7 +238,7 @@ export class BufferManager {
     public resetInvalidationWriteBufferCount(): void {
         this.invalidationWriteBufferCallCount = 0;
         if (this.cacheInvalidationManager) {
-            this.cacheInvalidationManager.resetWriteBufferCallCount();
+            this.cacheInvalidationManager.resetWriteBufferCount();
         }
     }
 

@@ -10,6 +10,7 @@ import { Renderer } from '../rendering/Renderer';
 import { Cache } from '../cache/Cache';
 import { StatusDisplay } from '../utils/StatusDisplay';
 import { Logger } from '../utils/Logger';
+import { ConsoleDisplay } from '../utils/ConsoleDisplay';
 import { CANVAS_CONFIG, STATUS_CONFIG } from '../utils/Constants';
 import { SphereEditor } from '../ui/SphereEditor';
 import { CameraController } from '../ui/CameraController';
@@ -28,7 +29,6 @@ export class WebGPURaytracerApp {
     public pixelCache: Cache;
     private cameraController: CameraController | null = null;
     private sphereEditor: SphereEditor | null = null;
-
 
     private logger: Logger;
     private initialized: boolean = false;
@@ -159,6 +159,9 @@ export class WebGPURaytracerApp {
             await this.renderFrame();
 
             this.statusDisplay.showSuccess('WebGPU Raytracer läuft!');
+
+            // Zeige schöne Console-Übersicht
+            ConsoleDisplay.showInitializationSummary(this);
 
         } catch (error) {
             this.logger.error('Fehler bei Initialisierung:', error);

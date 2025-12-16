@@ -23,6 +23,12 @@ export class SphereEditor {
     private boundMouseUp: (e: MouseEvent) => void;
     private boundWheel: (e: WheelEvent) => void;
 
+    // Bound UI event handlers
+    private boundApplyChangesOnEnter: (e: KeyboardEvent) => void;
+    private boundUpdateSphereColor: () => void;
+    private boundApplyInputChanges: () => void;
+    private boundDeselectSphere: () => void;
+
     // RAF-based drag throttling
     private dragPending: boolean = false;
     private dragRafId: number | null = null;
@@ -52,6 +58,16 @@ export class SphereEditor {
         this.boundMouseMove = (event) => this.onMouseMove(event);
         this.boundMouseUp = (event) => this.onMouseUp(event);
         this.boundWheel = (event) => this.onWheel(event);
+
+        // bind UI handlers
+        this.boundApplyChangesOnEnter = (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                this.applyInputChanges();
+            }
+        };
+        this.boundUpdateSphereColor = () => this.updateSphereColor();
+        this.boundApplyInputChanges = () => this.applyInputChanges();
+        this.boundDeselectSphere = () => this.deselectSphere();
 
         this.setupEventListeners();
         this.createUI();
@@ -157,16 +173,16 @@ export class SphereEditor {
                     this.logger.info(`Doppelklick auf Kugel ${sphereIndex} - UI angezeigt`);
                 }
 
-                // Drag-Ebene vorbereiten (unabhängig davon ob UI angezeigt wird)
                 const normal = new THREE.Vector3();
                 camera.getWorldDirection(normal).normalize();
                 this.dragPlane.setFromNormalAndCoplanarPoint(normal, this.selectedSphere.position);
 
-                // Schnittpunkt berechnen und Drag starten
                 if (this.raycaster.ray.intersectPlane(this.dragPlane, this.dragIntersectionPoint)) {
                     this.dragOffset.copy(this.selectedSphere.position).sub(this.dragIntersectionPoint);
                     this.isDragging = true;
                     this.canvas.style.cursor = 'grabbing';
+                } else {
+                    this.isDragging = false;
                 }
             } else {
                 // Keine gültige Sphere → deselect
@@ -186,8 +202,9 @@ export class SphereEditor {
         const camera = this.scene.getCamera();
         this.raycaster.setFromCamera(this.mouse, camera);
 
-        // Berechne Schnittpunkt mit der Drag-Ebene
-        if (this.raycaster.ray.intersectPlane(this.dragPlane, this.dragIntersectionPoint)) {
+        const intersectionFound = this.raycaster.ray.intersectPlane(this.dragPlane, this.dragIntersectionPoint);
+
+        if (intersectionFound) {
             // Neue Position = Schnittpunkt + Offset
             const newPosition = this.dragIntersectionPoint.clone().add(this.dragOffset);
             this.selectedSphere.position.copy(newPosition);
@@ -347,24 +364,34 @@ export class SphereEditor {
         const applyButton = this.uiContainer.querySelector('#apply-changes') as HTMLButtonElement;
         const closeButton = this.uiContainer.querySelector('#close-editor') as HTMLButtonElement;
 
-        // Enter-Taste in Input-Feldern
-        const applyChangesOnEnter = (e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
-                this.applyInputChanges();
-            }
-        };
+        // Add event listeners with bound handlers
+        posXInput.addEventListener('keypress', this.boundApplyChangesOnEnter);
+        posYInput.addEventListener('keypress', this.boundApplyChangesOnEnter);
+        posZInput.addEventListener('keypress', this.boundApplyChangesOnEnter);
+        radiusInput.addEventListener('keypress', this.boundApplyChangesOnEnter);
+        colorInput.addEventListener('input', this.boundUpdateSphereColor);
+        applyButton.addEventListener('click', this.boundApplyInputChanges);
+        closeButton.addEventListener('click', this.boundDeselectSphere);
+    }
 
-        posXInput.addEventListener('keypress', applyChangesOnEnter);
-        posYInput.addEventListener('keypress', applyChangesOnEnter);
-        posZInput.addEventListener('keypress', applyChangesOnEnter);
-        radiusInput.addEventListener('keypress', applyChangesOnEnter);
+    private removeUIListeners(): void {
+        if (!this.uiContainer) return;
 
-        // Farbe live ändern
-        colorInput.addEventListener('input', () => this.updateSphereColor());
+        const posXInput = this.uiContainer.querySelector('#pos-x') as HTMLInputElement;
+        const posYInput = this.uiContainer.querySelector('#pos-y') as HTMLInputElement;
+        const posZInput = this.uiContainer.querySelector('#pos-z') as HTMLInputElement;
+        const radiusInput = this.uiContainer.querySelector('#radius') as HTMLInputElement;
+        const colorInput = this.uiContainer.querySelector('#color') as HTMLInputElement;
+        const applyButton = this.uiContainer.querySelector('#apply-changes') as HTMLButtonElement;
+        const closeButton = this.uiContainer.querySelector('#close-editor') as HTMLButtonElement;
 
-        // Buttons
-        applyButton.addEventListener('click', () => this.applyInputChanges());
-        closeButton.addEventListener('click', () => this.deselectSphere());
+        if (posXInput) posXInput.removeEventListener('keypress', this.boundApplyChangesOnEnter);
+        if (posYInput) posYInput.removeEventListener('keypress', this.boundApplyChangesOnEnter);
+        if (posZInput) posZInput.removeEventListener('keypress', this.boundApplyChangesOnEnter);
+        if (radiusInput) radiusInput.removeEventListener('keypress', this.boundApplyChangesOnEnter);
+        if (colorInput) colorInput.removeEventListener('input', this.boundUpdateSphereColor);
+        if (applyButton) applyButton.removeEventListener('click', this.boundApplyInputChanges);
+        if (closeButton) closeButton.removeEventListener('click', this.boundDeselectSphere);
     }
 
     private applyInputChanges(): void {
@@ -434,8 +461,12 @@ export class SphereEditor {
     }
 
     public cleanup(): void {
+        // Remove UI event listeners first
+        this.removeUIListeners();
+
         if (this.uiContainer) {
             document.body.removeChild(this.uiContainer);
+            this.uiContainer = null;
         }
         if (this.dragRafId !== null) {
             cancelAnimationFrame(this.dragRafId);

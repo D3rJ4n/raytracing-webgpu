@@ -483,11 +483,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     
     var finalColor: vec3<f32>;
 
-    // ⚡ WICHTIG: Cache dient nur zur GEOMETRIE-Optimierung, nicht zum Überspringen von Supersampling!
-    // Wir machen IMMER Supersampling für Anti-Aliasing, aber nutzen den Cache um teure Ray-Intersections zu vermeiden
-
-    if (false) {  // ← DEAKTIVIERT: Alte Cache-Hit Logik (überspringt Supersampling)
-        // ===== ALTE CACHE-HIT LOGIK (DEAKTIVIERT) =====
+    if (isCacheValid(pixelCoords)) {
+    
         let cached = getCachedGeometry(pixelCoords);
 
         // ⚡ DEBUG: Log für Pixel in der Mitte des Bildes
@@ -534,7 +531,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
                 finalColor = calculateLightingWithShadow(hitPoint, normal, sphere.color, shadowFactor);
             }
         }
-        
+
     } else {
         // ===== CACHE-MISS: SUPERSAMPLING =====
         var accumulatedColor = vec3<f32>(0.0);
