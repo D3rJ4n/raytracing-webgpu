@@ -157,6 +157,25 @@ export class ConsoleDisplay {
             'color: #6A1B9A; font-weight: bold;');
         console.log('\n');
 
+        // Cache-Visualisierung
+        console.log('%c┌─ 🔍 CACHE-VISUALISIERUNG ──────────────────────────────────────┐',
+            'color: #00695C; font-weight: bold;');
+
+        const visTests = [
+            { name: 'cacheVisOn()', desc: 'Startet Rot/Grün Cache-Visualisierung' },
+        ];
+
+        visTests.forEach(test => {
+            console.log(`%c│  %c• ${test.name}`.padEnd(72) + `%c│`,
+                'color: #00695C', 'color: #004D40; font-weight: bold', 'color: #00695C');
+            console.log(`%c│    %c${test.desc}`.padEnd(72) + `%c│`,
+                'color: #00695C', 'color: #00796B', 'color: #00695C');
+        });
+
+        console.log('%c└───────────────────────────────────────────────────────────────┘',
+            'color: #00695C; font-weight: bold;');
+        console.log('\n');
+
         // Footer
         console.log('%c═══════════════════════════════════════════════════════════════',
             'color: #00838F; font-weight: bold;');

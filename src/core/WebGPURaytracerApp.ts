@@ -156,6 +156,10 @@ export class WebGPURaytracerApp {
             });
 
             this.initialized = true;
+
+            // ⚡ WICHTIG: Initial-Invalidierung nach Setup, damit beim ersten Render der Cache aufgebaut wird
+            await this.bufferManager.invalidateForSceneChanges(this.scene, { type: 'structural' });
+
             await this.renderFrame();
 
             this.statusDisplay.showSuccess('WebGPU Raytracer läuft!');

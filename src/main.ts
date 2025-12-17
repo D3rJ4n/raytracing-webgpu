@@ -20,6 +20,11 @@ async function main(): Promise<void> {
         // Setup Performance Tests
         setupPerformanceTests(app);
 
+        // Schnell-Toggles für Cache-Visualisierung über die Konsole
+        (window as any).cacheVisOn = () => app.getBufferManager().setCacheVisualization(true);
+        (window as any).cacheVisOff = () => app.getBufferManager().setCacheVisualization(false);
+        (window as any).cacheVis = (on: boolean = true) => app.getBufferManager().setCacheVisualization(!!on);
+
         // ===== ANIMATIONS-HELPER FUNKTIONEN =====
         let animationLoopRunning = false;
         let animationFrameId: number | null = null;

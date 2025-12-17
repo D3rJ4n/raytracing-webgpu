@@ -350,7 +350,8 @@ export class BufferManager {
             ground, 0, 0, 0,           // Ground Y position, padding
             light.x, light.y, light.z, 1.0,  // Light position, shadow enabled
             1.0, 8, 0.01, ambient,     // Reflections enabled, max bounces, min contribution, ambient
-            this.bvhEnabled ? 1.0 : 0.0  // BVH enabled flag
+            this.bvhEnabled ? 1.0 : 0.0, // BVH enabled flag (float index 12, offset 48)
+            0.0                         // debugCacheVis (float index 13, offset 52)
         ]);
 
         this.device.queue.writeBuffer(this.sceneConfigBuffer, 0, sceneConfigData);
@@ -384,6 +385,16 @@ export class BufferManager {
         // bvhEnabled ist das 13. float im Buffer (Index 12, Offset 48 Bytes)
         const bvhFlagData = new Float32Array([this.bvhEnabled ? 1.0 : 0.0]);
         this.device.queue.writeBuffer(this.sceneConfigBuffer, 48, bvhFlagData);
+    }
+
+    /**
+     * Schaltet die Shader-Visualisierung (rot/grün) für Cache-Miss/Hit an/aus
+     */
+    public setCacheVisualization(enabled: boolean): void {
+        if (!this.device || !this.sceneConfigBuffer) return;
+        const flag = new Float32Array([enabled ? 1.0 : 0.0]);
+        // debugCacheVis ist das 14. float (Index 13) → Offset 52 Bytes
+        this.device.queue.writeBuffer(this.sceneConfigBuffer, 52, flag);
     }
 
     private lastSphereHash: string = '';

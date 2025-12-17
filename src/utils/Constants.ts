@@ -69,10 +69,12 @@ export const BUFFER_CONFIG = {
         LABEL: 'Scene Config Buffer',
     },
     CACHE: {
-        COMPONENTS_PER_PIXEL: 9,     // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, normalX, normalY, normalZ, valid
+        SAMPLES_PER_CACHE: 4,        // 4 Samples pro Pixel für Multi-Sample Cache
+        COMPONENTS_PER_SAMPLE: 9,    // sphereIndex, hitDistance, hitPointX, hitPointY, hitPointZ, normalX, normalY, normalZ, valid
+        COMPONENTS_PER_PIXEL: 36,    // 4 samples × 9 components = 36 floats pro Pixel
         BYTES_PER_COMPONENT: 4,      // 4 bytes pro float32
-        BYTES_PER_PIXEL: 36,         // 9 * 4 = 36 bytes pro Pixel
-        LABEL: 'Geometry Cache Buffer',
+        BYTES_PER_PIXEL: 144,        // 36 * 4 = 144 bytes pro Pixel
+        LABEL: 'Geometry Cache Buffer (4-Sample)',
     },
     // BVH-BUFFERS
     BVH_NODES: {
@@ -100,7 +102,8 @@ export const BUFFER_CONFIG = {
     },
 } as const;
 
-// Cache-Layout pro Pixel (9 float32 Werte):
+// Cache-Layout: Multi-Sample Cache (4 samples × 9 floats = 36 floats pro Pixel)
+// Jedes Sample hat 9 float32 Werte:
 export const GEOMETRY_CACHE = {
     SPHERE_INDEX: 0,    // Index 0: Welche Sphere (als float, 0.0 = invalid)
     HIT_DISTANCE: 1,    // Index 1: Entfernung zum Hit-Point
